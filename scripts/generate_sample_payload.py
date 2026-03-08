@@ -26,6 +26,32 @@ from pathlib import Path
 from typing import List, Tuple
 
 BLOCK_SIZE = 4096
+ALL_PARTITIONS = [
+    "abl",
+    "bl31",
+    "gsa",
+    "modem",
+    "pvmfw",
+    "system",
+    "vbmeta_system",
+    "vendor_dlkm",
+    "bl1",
+    "boot",
+    "init_boot",
+    "pbl",
+    "system_dlkm",
+    "tzsw",
+    "vbmeta_vendor",
+    "vendor",
+    "bl2",
+    "dtbo",
+    "ldfw",
+    "product",
+    "system_ext",
+    "vbmeta",
+    "vendor_boot",
+    "vendor_kernel_boot",
+]
 
 
 @dataclass
@@ -76,46 +102,70 @@ def make_scattered_image(pattern_a: int, pattern_b: int) -> Tuple[bytes, List[Ex
     return bytes(img), [Extent(0, 1), Extent(2, 1)], blk_a + blk_b
 
 
+def make_partition_spec(name: str, idx: int, rnd: random.Random) -> PartitionSpec:
+    if name == "boot":
+        boot_img, boot_extents, boot_raw = make_scattered_image(0x41, 0x42)
+        return PartitionSpec(
+            name="boot",
+            img=boot_img,
+            op=Operation("REPLACE", boot_extents, boot_raw),
+        )
+
+    if name == "vendor_boot":
+        raw = bytes([0x56]) * (BLOCK_SIZE * 2)
+        return PartitionSpec(
+            name="vendor_boot",
+            img=raw,
+            op=Operation("REPLACE_XZ", [Extent(0, 2)], lzma.compress(raw, format=lzma.FORMAT_XZ)),
+        )
+
+    if name == "system_ext":
+        raw = bytes([0x33]) * (BLOCK_SIZE * 3)
+        return PartitionSpec(
+            name="system_ext",
+            img=raw,
+            op=Operation("REPLACE_BZ", [Extent(0, 3)], bz2.compress(raw)),
+        )
+
+    if name == "product":
+        raw = bytes(rnd.randrange(0, 256) for _ in range(BLOCK_SIZE * 4))
+        return PartitionSpec(
+            name="product",
+            img=raw,
+            op=Operation("ZSTD", [Extent(0, 4)], zstd_compress(raw)),
+        )
+
+    if name == "vbmeta":
+        img = bytes(BLOCK_SIZE)
+        return PartitionSpec(
+            name="vbmeta",
+            img=img,
+            op=Operation("ZERO", [Extent(0, 1)], b""),
+        )
+
+    block_count = 1 + (idx % 3)
+    op_type = ("REPLACE", "REPLACE_XZ", "REPLACE_BZ", "ZSTD", "ZERO")[idx % 5]
+    raw = bytes([0x20 + (idx * 13 % 200)]) * (BLOCK_SIZE * block_count)
+    extents = [Extent(0, block_count)]
+
+    if op_type == "REPLACE":
+        return PartitionSpec(name=name, img=raw, op=Operation(op_type, extents, raw))
+    if op_type == "REPLACE_XZ":
+        return PartitionSpec(
+            name=name,
+            img=raw,
+            op=Operation(op_type, extents, lzma.compress(raw, format=lzma.FORMAT_XZ)),
+        )
+    if op_type == "REPLACE_BZ":
+        return PartitionSpec(name=name, img=raw, op=Operation(op_type, extents, bz2.compress(raw)))
+    if op_type == "ZSTD":
+        return PartitionSpec(name=name, img=raw, op=Operation(op_type, extents, zstd_compress(raw)))
+    return PartitionSpec(name=name, img=bytes(BLOCK_SIZE * block_count), op=Operation("ZERO", extents, b""))
+
+
 def generate_specs(seed: int) -> List[PartitionSpec]:
     rnd = random.Random(seed)
-
-    boot_img, boot_extents, boot_raw = make_scattered_image(0x41, 0x42)
-    boot = PartitionSpec(
-        name="boot",
-        img=boot_img,
-        op=Operation("REPLACE", boot_extents, boot_raw),
-    )
-
-    vendor_boot_raw = bytes([0x56]) * (BLOCK_SIZE * 2)
-    vendor_boot_img = vendor_boot_raw
-    vendor_boot = PartitionSpec(
-        name="vendor_boot",
-        img=vendor_boot_img,
-        op=Operation("REPLACE_XZ", [Extent(0, 2)], lzma.compress(vendor_boot_raw, format=lzma.FORMAT_XZ)),
-    )
-
-    system_ext_raw = bytes([0x33]) * (BLOCK_SIZE * 3)
-    system_ext = PartitionSpec(
-        name="system_ext",
-        img=system_ext_raw,
-        op=Operation("REPLACE_BZ", [Extent(0, 3)], bz2.compress(system_ext_raw)),
-    )
-
-    product_raw = bytes(rnd.randrange(0, 256) for _ in range(BLOCK_SIZE * 4))
-    product = PartitionSpec(
-        name="product",
-        img=product_raw,
-        op=Operation("ZSTD", [Extent(0, 4)], zstd_compress(product_raw)),
-    )
-
-    vbmeta_img = bytes(BLOCK_SIZE)  # ZERO op result.
-    vbmeta = PartitionSpec(
-        name="vbmeta",
-        img=vbmeta_img,
-        op=Operation("ZERO", [Extent(0, 1)], b""),
-    )
-
-    return [boot, vendor_boot, system_ext, product, vbmeta]
+    return [make_partition_spec(name, idx, rnd) for idx, name in enumerate(ALL_PARTITIONS)]
 
 
 def op_type_to_proto_enum(name: str) -> str:

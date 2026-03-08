@@ -13,16 +13,12 @@ pub fn makeDefaultOutputDirectory(allocator: std.mem.Allocator, io: std.Io) Erro
     var tm_buf: c.struct_tm = undefined;
     if (c.localtime_r(&now, &tm_buf) == null) return error.TimeUnavailable;
 
-    const year: i32 = tm_buf.tm_year + 1900;
-    const month: i32 = tm_buf.tm_mon + 1;
-    const day: i32 = tm_buf.tm_mday;
-    const hour: i32 = tm_buf.tm_hour;
-    const minute: i32 = tm_buf.tm_min;
-    const second: i32 = tm_buf.tm_sec;
+    var ts_buf: [32]u8 = undefined;
+    const ts_len = c.strftime(@ptrCast(&ts_buf), ts_buf.len, "%Y%m%d_%H%M%S", &tm_buf);
+    if (ts_len == 0) return error.TimeUnavailable;
 
     var buf: [64]u8 = undefined;
-    const dir = std.fmt.bufPrint(&buf, "extracted_{d:0>4}{d:0>2}{d:0>2}_{d:0>2}{d:0>2}{d:0>2}", .{
-        year, month, day, hour, minute, second,
-    }) catch return error.IoFailure;
+    const timestamp = ts_buf[0..@intCast(ts_len)];
+    const dir = std.fmt.bufPrint(&buf, "extracted_{s}", .{timestamp}) catch return error.IoFailure;
     return try allocator.dupe(u8, dir);
 }
