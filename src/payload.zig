@@ -56,7 +56,9 @@ pub const Payload = struct {
         var i: usize = 0;
         while (i < n) : (i += 1) {
             const name = ctx.partitionName(i) orelse continue;
-            w.print("  {s} ({d} bytes)\n", .{ name, ctx.partitionSize(i) }) catch return error.IoFailure;
+            w.print("  {s} (", .{name}) catch return error.IoFailure;
+            printSizeKbMb(w, ctx.partitionSize(i)) catch return error.IoFailure;
+            w.writeAll(")\n") catch return error.IoFailure;
         }
     }
 
@@ -209,6 +211,28 @@ pub const Payload = struct {
         fw.flush() catch return error.IoFailure;
     }
 };
+
+fn printSizeKbMb(w: *std.Io.Writer, size_bytes: u64) !void {
+    const kb: u64 = 1024;
+    const mb: u64 = 1024 * 1024;
+
+    if (size_bytes >= mb) {
+        const scaled = @divFloor(size_bytes * 100 + mb / 2, mb);
+        const whole = @divFloor(scaled, 100);
+        const frac = @mod(scaled, 100);
+        try w.print("{d}.{d:0>2} MB", .{ whole, frac });
+        return;
+    }
+
+    const scaled = @divFloor(size_bytes * 10 + kb / 2, kb);
+    const whole = @divFloor(scaled, 10);
+    const frac = @mod(scaled, 10);
+    if (frac == 0) {
+        try w.print("{d} KB", .{whole});
+        return;
+    }
+    try w.print("{d}.{d} KB", .{ whole, frac });
+}
 
 const WorkerShared = struct {
     payload: *Payload,
