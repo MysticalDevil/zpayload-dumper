@@ -1,5 +1,5 @@
 const std = @import("std");
-const errors = @import("errors.zig");
+const errors = @import("../errors.zig");
 
 pub const Error = errors.AppError;
 

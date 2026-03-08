@@ -2,32 +2,15 @@ const std = @import("std");
 const errors = @import("errors.zig");
 const payload = @import("payload.zig");
 const ui_mod = @import("cli_ui.zig");
-const zip_input = @import("zip_input.zig");
-const c = @cImport({
-    @cInclude("time.h");
-});
+const zip_payload = @import("input/zip_payload.zig");
+const cli_args = @import("app/cli_args.zig");
+const messages = @import("app/messages.zig");
+const output_dir = @import("app/output_dir.zig");
 
 const Error = errors.AppError;
-
-const CliOptions = struct {
-    allocator: std.mem.Allocator,
-    list: bool = false,
-    partitions: ?[]u8 = null,
-    output: ?[]u8 = null,
-    concurrency: i32 = 4,
-    input: ?[]u8 = null,
-    color_mode: ui_mod.ColorMode = .auto,
-
-    fn init(allocator: std.mem.Allocator) CliOptions {
-        return .{ .allocator = allocator };
-    }
-
-    fn deinit(self: *CliOptions) void {
-        if (self.partitions) |v| self.allocator.free(v);
-        if (self.output) |v| self.allocator.free(v);
-        if (self.input) |v| self.allocator.free(v);
-    }
-};
+const default_tmp_base = "/tmp";
+const zip_suffix = ".zip";
+const zip_detected_msg = "zip input detected, extracting payload.bin first";
 
 pub fn main(init: std.process.Init) !void {
     run(init) catch |err| switch (err) {
@@ -36,7 +19,7 @@ pub fn main(init: std.process.Init) !void {
             const io = init.io;
             var stderr_file = std.Io.File.stderr();
             var stderr = stderr_file.writer(io, &.{});
-            stderr.interface.print("error: {s}\n", .{userMessage(err)}) catch {};
+            stderr.interface.print("error: {s}\n", .{messages.userMessage(err)}) catch {};
             return err;
         },
     };
@@ -56,7 +39,7 @@ fn run(init: std.process.Init) Error!void {
 
     const argv = init.minimal.args.toSlice(arena) catch return error.IoFailure;
 
-    var opts = try parseArgs(gpa, argv, out_writer, err_writer);
+    var opts = try cli_args.parseArgs(gpa, argv, out_writer, err_writer);
     defer opts.deinit();
 
     const auto_color = stdout_file.isTty(io) catch |err| blk: {
@@ -81,10 +64,10 @@ fn run(init: std.process.Init) Error!void {
     };
 
     var effective_payload = opts.input.?;
-    const tmp_base = init.environ_map.get("TMPDIR") orelse "/tmp";
-    if (std.mem.endsWith(u8, effective_payload, ".zip")) {
-        ui.warn("zip input detected, extracting payload.bin first", .{}) catch return error.IoFailure;
-        const extracted = try zip_input.extractPayloadBinFromZip(gpa, io, tmp_base, effective_payload);
+    const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
+    if (std.mem.endsWith(u8, effective_payload, zip_suffix)) {
+        ui.warn(zip_detected_msg, .{}) catch return error.IoFailure;
+        const extracted = try zip_payload.extractPayloadBinFromZip(gpa, io, tmp_base, effective_payload);
         cleanup_tmp_dir = extracted.temp_dir;
         cleanup_payload_path = extracted.payload_path;
         effective_payload = extracted.payload_path;
@@ -108,13 +91,13 @@ fn run(init: std.process.Init) Error!void {
     var owned_output: ?[]u8 = null;
     defer if (owned_output) |dir| gpa.free(dir);
 
-    const output_dir = if (opts.output) |dir| dir else blk: {
-        const dir = try makeDefaultOutputDirectory(gpa, io);
+    const out_path = if (opts.output) |dir| dir else blk: {
+        const dir = try output_dir.makeDefaultOutputDirectory(gpa, io);
         owned_output = dir;
         break :blk dir;
     };
-    std.Io.Dir.cwd().createDirPath(io, output_dir) catch return error.IoFailure;
-    ui.info("output dir: {s}", .{output_dir}) catch return error.IoFailure;
+    std.Io.Dir.cwd().createDirPath(io, out_path) catch return error.IoFailure;
+    ui.info("output dir: {s}", .{out_path}) catch return error.IoFailure;
     ui.info("workers: {d}", .{opts.concurrency}) catch return error.IoFailure;
 
     if (opts.partitions) |parts_csv| {
@@ -126,180 +109,11 @@ fn run(init: std.process.Init) Error!void {
             if (part.len != 0) try list.append(part);
         }
         ui.info("extracting selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
-        try dumper.extractSelected(output_dir, list.items, @intCast(opts.concurrency), &ui);
+        try dumper.extractSelected(out_path, list.items, @intCast(opts.concurrency), &ui);
     } else {
         ui.info("extracting all partitions", .{}) catch return error.IoFailure;
-        try dumper.extractAll(output_dir, @intCast(opts.concurrency), &ui);
+        try dumper.extractAll(out_path, @intCast(opts.concurrency), &ui);
     }
 
     ui.success("extraction complete", .{}) catch return error.IoFailure;
-}
-
-fn userMessage(err: Error) []const u8 {
-    return switch (err) {
-        error.InvalidConcurrency => "invalid concurrency, expected value >= 1",
-        error.InvalidZipArchive => "invalid zip archive or failed to read zip content",
-        error.PayloadNotFoundInZip => "payload.bin not found in zip archive",
-        error.InvalidMagic => "invalid payload magic, expected CrAU",
-        error.UnsupportedPayloadVersion => "unsupported payload version (expected 2)",
-        error.ManifestNotInitialized => "payload manifest is not initialized",
-        error.DecodeFailed => "failed to decode protobuf manifest/signature",
-        error.InvalidDstExtents => "invalid destination extents in operation",
-        error.UnhandledOperationType => "unsupported payload operation type",
-        error.DecompressedSizeMismatch => "decompressed size mismatch",
-        error.XzDecompressFailed => "xz decompression failed",
-        error.Bzip2DecompressFailed => "bzip2 decompression failed",
-        error.ZstdDecompressFailed => "zstd decompression failed",
-        error.UnexpectedBytesWritten => "unexpected bytes written during extraction",
-        error.ChecksumMismatch => "operation checksum mismatch",
-        error.ExtractFailed => "one or more partitions failed to extract",
-        error.TimeUnavailable => "failed to read local time for default output directory",
-        error.IntegerOverflow => "numeric overflow while parsing payload metadata",
-        error.IoFailure => "i/o failure while reading or writing payload data",
-        error.OutOfMemory => "out of memory",
-        error.Usage => "invalid arguments",
-        error.HelpDisplayed => "help displayed",
-    };
-}
-
-fn parseArgs(
-    allocator: std.mem.Allocator,
-    args: []const []const u8,
-    out: *std.Io.Writer,
-    err_out: *std.Io.Writer,
-) Error!CliOptions {
-    var opts = CliOptions.init(allocator);
-    errdefer opts.deinit();
-
-    var i: usize = 1; // argv0
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-
-        if (arg.len > 0 and arg[0] == '-') {
-            if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-                try help(out);
-                return error.HelpDisplayed;
-            }
-            if (std.mem.eql(u8, arg, "--color")) {
-                opts.color_mode = .always;
-                continue;
-            }
-            if (std.mem.eql(u8, arg, "--no-color")) {
-                opts.color_mode = .never;
-                continue;
-            }
-            if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list")) {
-                opts.list = true;
-                continue;
-            }
-
-            if (std.mem.startsWith(u8, arg, "--partitions=")) {
-                try replaceOwned(allocator, &opts.partitions, arg["--partitions=".len..]);
-                continue;
-            }
-            if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--partitions")) {
-                i += 1;
-                if (i >= args.len) return usage(err_out);
-                try replaceOwned(allocator, &opts.partitions, args[i]);
-                continue;
-            }
-
-            if (std.mem.startsWith(u8, arg, "--output=")) {
-                try replaceOwned(allocator, &opts.output, arg["--output=".len..]);
-                continue;
-            }
-            if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output")) {
-                i += 1;
-                if (i >= args.len) return usage(err_out);
-                try replaceOwned(allocator, &opts.output, args[i]);
-                continue;
-            }
-
-            if (std.mem.startsWith(u8, arg, "--concurrency=")) {
-                opts.concurrency = std.fmt.parseInt(i32, arg["--concurrency=".len..], 10) catch return error.Usage;
-                continue;
-            }
-            if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--concurrency")) {
-                i += 1;
-                if (i >= args.len) return usage(err_out);
-                opts.concurrency = std.fmt.parseInt(i32, args[i], 10) catch return error.Usage;
-                continue;
-            }
-
-            return usage(err_out);
-        }
-
-        if (opts.input == null) {
-            try replaceOwned(allocator, &opts.input, arg);
-        } else {
-            return usage(err_out);
-        }
-    }
-
-    if (opts.input == null) return usage(err_out);
-    return opts;
-}
-
-fn replaceOwned(allocator: std.mem.Allocator, slot: *?[]u8, value: []const u8) Error!void {
-    if (slot.*) |old| allocator.free(old);
-    slot.* = try allocator.dupe(u8, value);
-}
-
-fn usage(err_out: *std.Io.Writer) Error {
-    err_out.writeAll(
-        \\Usage: zpayload-dumper [options] <payload.bin|payload.zip>
-        \\Try: zpayload-dumper --help
-        \\
-    ) catch |err| {
-        std.log.warn("failed to write usage text: {}", .{err});
-    };
-    return error.Usage;
-}
-
-fn help(out: *std.Io.Writer) Error!void {
-    out.writeAll(
-        \\zpayload-dumper - Android payload.bin extractor
-        \\
-        \\Usage:
-        \\  zpayload-dumper [options] <payload.bin|payload.zip>
-        \\
-        \\Options:
-        \\  -h, --help                 Show this help
-        \\  -l, --list                 Show partition list only
-        \\  -p, --partitions <csv>     Extract selected partitions
-        \\  -o, --output <dir>         Output directory
-        \\  -c, --concurrency <n>      Number of parallel partition workers
-        \\      --color                Force colored output
-        \\      --no-color             Disable colored output
-        \\
-        \\Examples:
-        \\  zpayload-dumper -l /path/to/payload.bin
-        \\  zpayload-dumper -p boot,vendor -o out /path/to/payload.bin
-        \\  zpayload-dumper /path/to/payload.zip
-        \\
-        \\Supported operations:
-        \\  REPLACE, REPLACE_XZ, REPLACE_BZ, ZSTD, ZERO
-        \\
-    ) catch return error.IoFailure;
-}
-
-fn makeDefaultOutputDirectory(allocator: std.mem.Allocator, io: std.Io) Error![]u8 {
-    _ = io;
-    var now = c.time(null);
-    if (now < 0) return error.TimeUnavailable;
-    var tm_buf: c.struct_tm = undefined;
-    if (c.localtime_r(&now, &tm_buf) == null) return error.TimeUnavailable;
-
-    const year: i32 = tm_buf.tm_year + 1900;
-    const month: i32 = tm_buf.tm_mon + 1;
-    const day: i32 = tm_buf.tm_mday;
-    const hour: i32 = tm_buf.tm_hour;
-    const minute: i32 = tm_buf.tm_min;
-    const second: i32 = tm_buf.tm_sec;
-
-    var buf: [64]u8 = undefined;
-    const dir = std.fmt.bufPrint(&buf, "extracted_{d:0>4}{d:0>2}{d:0>2}_{d:0>2}{d:0>2}{d:0>2}", .{
-        year, month, day, hour, minute, second,
-    }) catch return error.IoFailure;
-    return try allocator.dupe(u8, dir);
 }
