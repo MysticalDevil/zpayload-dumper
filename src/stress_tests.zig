@@ -61,7 +61,7 @@ test "stress full extraction baseline sample" {
     const vendor_out = try std.fmt.allocPrint(allocator, "{s}/vendor.img", .{out_dir});
     defer allocator.free(vendor_out);
 
-    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/boot.img", boot_out);
-    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/system.img", system_out);
-    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vendor.img", vendor_out);
+    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/boot.img", boot_out);
+    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/system.img", system_out);
+    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/vendor.img", vendor_out);
 }

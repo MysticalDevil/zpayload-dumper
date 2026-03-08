@@ -69,7 +69,7 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
 
     const payload_path = if (args.len >= 2) args[1] else "testdata/payload.bin";
-    const baseline_dir = if (args.len >= 3) args[2] else "testdata/payload-dumper-go-extracted";
+    const baseline_dir = if (args.len >= 3) args[2] else "testdata/reference-extracted";
 
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));

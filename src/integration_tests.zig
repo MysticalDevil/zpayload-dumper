@@ -76,9 +76,9 @@ test "integration selected partitions match go baseline" {
     const vendor_boot_out = try std.fmt.allocPrint(allocator, "{s}/vendor_boot.img", .{out_dir});
     defer allocator.free(vendor_boot_out);
 
-    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/boot.img", boot_out);
-    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vbmeta.img", vbmeta_out);
-    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vendor_boot.img", vendor_boot_out);
+    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/boot.img", boot_out);
+    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/vbmeta.img", vbmeta_out);
+    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/vendor_boot.img", vendor_boot_out);
 }
 
 test "extract selected writes only requested partition" {
@@ -110,7 +110,7 @@ test "extract selected writes only requested partition" {
 
     try std.testing.expect(fileExists(io, vendor_boot_out));
     try std.testing.expect(!fileExists(io, boot_out));
-    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vendor_boot.img", vendor_boot_out);
+    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/vendor_boot.img", vendor_boot_out);
 }
 
 test "fixture payload partition count is stable" {
