@@ -1,12 +1,11 @@
 const std = @import("std");
+const errors = @import("../errors.zig");
 
 const c = @cImport({
     @cInclude("upb_wrap.h");
 });
 
-pub const Error = error{
-    DecodeFailed,
-};
+pub const Error = errors.AppError;
 
 pub const OperationType = enum(i32) {
     replace = 0,

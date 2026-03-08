@@ -35,6 +35,43 @@ Prerequisites:
 - `protoc` with `--upb_out` and `--upb_minitable_out`
 - System libs: `upb`, `utf8_range`, `lzma`, `bz2`, `zstd`
 
+### Install Dependencies (by distro)
+
+The package names below are checked against official distro package indexes (as of 2026-03-08).
+If your linker still reports missing `upb`/`utf8_range` symbols, install or build those libraries manually.
+
+#### Debian
+
+```bash
+sudo apt update
+sudo apt install -y protobuf-compiler liblzma-dev libbz2-dev libzstd-dev libupb-dev libgrpc-dev
+```
+
+`libgrpc-dev` is included because it provides `libupb.so` in Debian package contents.
+
+#### Fedora
+
+```bash
+sudo dnf install -y protobuf-compiler xz-devel bzip2-devel libzstd-devel grpc-devel
+```
+
+#### Arch Linux
+
+```bash
+sudo pacman -S --needed protobuf xz bzip2 zstd grpc
+```
+
+Arch `grpc` package provides `libupb.so`; `upb`/`utf8_range` are not exposed as separate official packages.
+
+#### Gentoo
+
+```bash
+sudo emerge --ask dev-libs/protobuf app-arch/xz-utils app-arch/bzip2 app-arch/zstd net-libs/grpc
+```
+
+Gentoo `dev-libs/protobuf` includes `libupb` USE support; if your profile/package config does not
+provide linkable `upb`/`utf8_range`, install/build them manually before `zig build`.
+
 Build:
 
 ```bash
@@ -45,6 +82,12 @@ Tests:
 
 ```bash
 zig build test
+```
+
+Stress tests:
+
+```bash
+zig build test-stress
 ```
 
 ## Usage
@@ -59,6 +102,9 @@ Options:
 - `-p`, `--partitions <csv>`: extract selected partitions
 - `-o`, `--output <dir>`: output directory
 - `-c`, `--concurrency <n>`: number of parallel partition workers
+
+If `-o` is omitted, the default output directory is generated as local time:
+`extracted_YYYYMMDD_HHMMSS`.
 
 Progress:
 

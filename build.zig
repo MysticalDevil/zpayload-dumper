@@ -1,10 +1,31 @@
 const std = @import("std");
 
+fn attachPayloadDeps(b: *std.Build, module: *std.Build.Module, upb_out: std.Build.LazyPath, minitable_out: std.Build.LazyPath) void {
+    module.addIncludePath(upb_out);
+    module.addIncludePath(minitable_out);
+    module.addIncludePath(b.path("src/c"));
+    module.addCSourceFile(.{
+        .file = upb_out.path(b, "update_metadata.upb.c"),
+    });
+    module.addCSourceFile(.{
+        .file = minitable_out.path(b, "update_metadata.upb_minitable.c"),
+    });
+    module.addCSourceFile(.{
+        .file = b.path("src/c/upb_wrap.c"),
+    });
+
+    module.linkSystemLibrary("upb", .{});
+    module.linkSystemLibrary("utf8_range", .{});
+    module.linkSystemLibrary("lzma", .{});
+    module.linkSystemLibrary("bz2", .{});
+    module.linkSystemLibrary("zstd", .{});
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const protoc = b.addSystemCommand(&.{ "protoc" });
+    const protoc = b.addSystemCommand(&.{"protoc"});
     const upb_out = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
     const minitable_out = protoc.addPrefixedOutputDirectoryArg("--upb_minitable_out=", "proto_minitable");
     protoc.addArg("--proto_path=proto");
@@ -16,25 +37,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-
-    root_module.addIncludePath(upb_out);
-    root_module.addIncludePath(minitable_out);
-    root_module.addIncludePath(b.path("src/c"));
-    root_module.addCSourceFile(.{
-        .file = upb_out.path(b, "update_metadata.upb.c"),
-    });
-    root_module.addCSourceFile(.{
-        .file = minitable_out.path(b, "update_metadata.upb_minitable.c"),
-    });
-    root_module.addCSourceFile(.{
-        .file = b.path("src/c/upb_wrap.c"),
-    });
-
-    root_module.linkSystemLibrary("upb", .{});
-    root_module.linkSystemLibrary("utf8_range", .{});
-    root_module.linkSystemLibrary("lzma", .{});
-    root_module.linkSystemLibrary("bz2", .{});
-    root_module.linkSystemLibrary("zstd", .{});
+    attachPayloadDeps(b, root_module, upb_out, minitable_out);
 
     const exe = b.addExecutable(.{
         .name = "zpayload-dumper",
@@ -53,4 +56,18 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    const stress_module = b.createModule(.{
+        .root_source_file = b.path("src/stress_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    attachPayloadDeps(b, stress_module, upb_out, minitable_out);
+    const stress_tests = b.addTest(.{
+        .root_module = stress_module,
+    });
+    const run_stress = b.addRunArtifact(stress_tests);
+    const stress_step = b.step("test-stress", "Run stress/integration tests");
+    stress_step.dependOn(&run_stress.step);
 }

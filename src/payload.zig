@@ -1,9 +1,11 @@
 const std = @import("std");
+const errors = @import("errors.zig");
 const upb = @import("ffi/upb.zig");
 const compress = @import("ffi/compress.zig");
 const ui_mod = @import("cli_ui.zig");
 
 pub const block_size: u64 = 4096;
+pub const Error = errors.AppError;
 
 pub const Payload = struct {
     allocator: std.mem.Allocator,
@@ -14,8 +16,8 @@ pub const Payload = struct {
     data_offset: u64 = 0,
     ctx: ?upb.Context = null,
 
-    pub fn open(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) !Payload {
-        const file = try std.Io.Dir.cwd().openFile(io, filename, .{});
+    pub fn open(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) Error!Payload {
+        const file = std.Io.Dir.cwd().openFile(io, filename, .{}) catch return error.IoFailure;
         return .{
             .allocator = allocator,
             .io = io,
@@ -28,7 +30,7 @@ pub const Payload = struct {
         self.file.close(self.io);
     }
 
-    pub fn init(self: *Payload) !void {
+    pub fn init(self: *Payload) Error!void {
         self.header = try readHeader(self.file, self.io);
 
         const manifest_buf = try readAtAlloc(self.allocator, self.file, self.io, 24, self.header.manifest_len);
@@ -42,23 +44,23 @@ pub const Payload = struct {
         self.data_offset = self.metadata_size + self.header.metadata_signature_len;
     }
 
-    pub fn printPartitionList(self: *Payload, w: *std.Io.Writer) !void {
+    pub fn printPartitionList(self: *Payload, w: *std.Io.Writer) Error!void {
         const ctx = self.ctx orelse return error.ManifestNotInitialized;
-        try w.writeAll("Found partitions:\n");
+        w.writeAll("Found partitions:\n") catch return error.IoFailure;
         const n = ctx.partitionCount();
         var i: usize = 0;
         while (i < n) : (i += 1) {
             const name = ctx.partitionName(i) orelse continue;
-            try w.print("  {s} ({d} bytes)\n", .{ name, ctx.partitionSize(i) });
+            w.print("  {s} ({d} bytes)\n", .{ name, ctx.partitionSize(i) }) catch return error.IoFailure;
         }
     }
 
-    pub fn partitionCount(self: *Payload) !usize {
+    pub fn partitionCount(self: *Payload) Error!usize {
         const ctx = self.ctx orelse return error.ManifestNotInitialized;
         return ctx.partitionCount();
     }
 
-    pub fn extractAll(self: *Payload, output_dir: []const u8, concurrency: usize, ui: *const ui_mod.Ui) !void {
+    pub fn extractAll(self: *Payload, output_dir: []const u8, concurrency: usize, ui: *const ui_mod.Ui) Error!void {
         return self.extractSelected(output_dir, &.{}, concurrency, ui);
     }
 
@@ -68,7 +70,7 @@ pub const Payload = struct {
         selected: []const []const u8,
         concurrency: usize,
         ui: *const ui_mod.Ui,
-    ) !void {
+    ) Error!void {
         const ctx = self.ctx orelse return error.ManifestNotInitialized;
         if (concurrency < 1) return error.InvalidConcurrency;
 
@@ -114,7 +116,7 @@ pub const Payload = struct {
         };
 
         for (threads) |*thread| {
-            thread.* = try std.Thread.spawn(.{}, workerMain, .{&shared});
+            thread.* = std.Thread.spawn(.{}, workerMain, .{&shared}) catch return error.IoFailure;
         }
 
         var prev_lines: usize = 0;
@@ -128,7 +130,7 @@ pub const Payload = struct {
                 };
                 last_render_ns = now_ns;
             }
-            _ = try self.io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .awake);
+            _ = self.io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch return error.IoFailure;
         }
 
         for (threads) |thread| thread.join();
@@ -138,17 +140,15 @@ pub const Payload = struct {
         };
 
         if (collector.hasErrors()) {
-            try collector.print(ui);
+            collector.print(ui) catch return error.IoFailure;
             return error.ExtractFailed;
         }
     }
 
-    fn extractPartition(self: *Payload, ctx: upb.Context, pidx: usize, out: std.Io.File, tracker: *ProgressTracker, tracker_idx: usize) !void {
+    fn extractPartition(self: *Payload, ctx: upb.Context, pidx: usize, out: std.Io.File, tracker: *ProgressTracker, tracker_idx: usize) Error!void {
         var writer_buf: [64 * 1024]u8 = undefined;
         var fw = out.writer(self.io, &writer_buf);
-        errdefer fw.flush() catch |err| {
-            std.log.warn("failed to flush output writer on error path: {}", .{err});
-        };
+        errdefer fw.flush() catch {};
 
         const op_count = ctx.operationCount(pidx);
         var oidx: usize = 0;
@@ -159,47 +159,49 @@ pub const Payload = struct {
             const blob_len_u64 = ctx.operationDataLength(pidx, oidx);
             const blob_off_u64 = ctx.operationDataOffset(pidx, oidx);
             const blob_abs = self.data_offset + blob_off_u64;
-            const blob = try readAtAlloc(self.allocator, self.file, self.io, blob_abs, blob_len_u64);
-            defer self.allocator.free(blob);
-
-            var hash: [32]u8 = undefined;
-            std.crypto.hash.sha2.Sha256.hash(blob, &hash, .{});
-
             const expected_uncompressed = sumExtentBytes(ctx, pidx, oidx, extent_count);
             const op_type = ctx.operationType(pidx, oidx) orelse return error.UnhandledOperationType;
+            var cursor = ExtentCursor.init(ctx, pidx, oidx, extent_count, expected_uncompressed, &fw);
+            var hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
             switch (op_type) {
                 .replace => {
-                    if (blob.len != expected_uncompressed) return error.UnexpectedBytesWritten;
-                    try copyToExtents(ctx, pidx, oidx, extent_count, &fw, blob);
+                    _ = try compress.copyRawToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
                 },
                 .replace_xz => {
-                    const out_buf = try compress.decompressXz(self.allocator, blob, expected_uncompressed);
-                    defer self.allocator.free(out_buf);
-                    try copyToExtents(ctx, pidx, oidx, extent_count, &fw, out_buf);
+                    _ = try compress.decompressXzToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
                 },
                 .replace_bz => {
-                    const out_buf = try compress.decompressBz2(self.allocator, blob, expected_uncompressed);
-                    defer self.allocator.free(out_buf);
-                    try copyToExtents(ctx, pidx, oidx, extent_count, &fw, out_buf);
+                    _ = try compress.decompressBz2ToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
                 },
                 .zstd => {
-                    const out_buf = try compress.decompressZstd(self.allocator, blob, expected_uncompressed);
-                    defer self.allocator.free(out_buf);
-                    try copyToExtents(ctx, pidx, oidx, extent_count, &fw, out_buf);
+                    _ = try compress.decompressZstdToWriter(self.allocator, self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
                 },
                 .zero => {
-                    try writeZeroToExtents(self.allocator, ctx, pidx, oidx, extent_count, &fw);
+                    var hash_buf: [1024 * 1024]u8 = undefined;
+                    var remaining = blob_len_u64;
+                    var pos = blob_abs;
+                    while (remaining > 0) {
+                        const n: usize = @intCast(@min(remaining, hash_buf.len));
+                        _ = self.file.readPositionalAll(self.io, hash_buf[0..n], pos) catch return error.IoFailure;
+                        hasher.update(hash_buf[0..n]);
+                        remaining -= n;
+                        pos += n;
+                    }
+                    try writeZeroToExtents(self.allocator, ctx, pidx, oidx, extent_count, &cursor);
                 },
                 else => return error.UnhandledOperationType,
             }
+            try cursor.finish();
 
             if (ctx.operationSha256(pidx, oidx)) |expected| {
+                var hash: [32]u8 = undefined;
+                hasher.final(&hash);
                 if (!std.mem.eql(u8, expected, hash[0..])) return error.ChecksumMismatch;
             }
             tracker.updateOps(tracker_idx, oidx + 1);
         }
-        try fw.flush();
+        fw.flush() catch return error.IoFailure;
     }
 };
 
@@ -325,11 +327,13 @@ const ErrorCollector = struct {
         };
     }
 
-    fn print(self: *ErrorCollector, ui: *const ui_mod.Ui) !void {
+    fn print(self: *ErrorCollector, ui: *const ui_mod.Ui) Error!void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
-        for (self.messages.items) |msg| try ui.fail("{s}", .{msg});
-        if (self.dropped) try ui.fail("some worker errors could not be recorded due to allocation failure", .{});
+        for (self.messages.items) |msg| {
+            ui.fail("{s}", .{msg}) catch return error.IoFailure;
+        }
+        if (self.dropped) ui.fail("some worker errors could not be recorded due to allocation failure", .{}) catch return error.IoFailure;
     }
 };
 
@@ -414,11 +418,7 @@ fn renderProgress(tracker: *ProgressTracker, ui: *const ui_mod.Ui, prev_lines: *
     if (ui.useColor()) {
         const pct_color = percentColor(overall_pct);
         try out.print(
-            "\x1b[1;36mACTIVE\x1b[0m \x1b[36m{d}\x1b[0m "
-            ++ "\x1b[1;31mFAIL\x1b[0m \x1b[31m{d}\x1b[0m "
-            ++ "\x1b[1;32mDONE\x1b[0m \x1b[32m{d}/{d}\x1b[0m "
-            ++ "\x1b[1;37mPEND\x1b[0m \x1b[37m{d}\x1b[0m "
-            ++ "\x1b[1;35mTOTAL\x1b[0m {s}{d: >3}%\x1b[0m \x1b[90m({d}/{d})\x1b[0m\n",
+            "\x1b[1;36mACTIVE\x1b[0m \x1b[36m{d}\x1b[0m " ++ "\x1b[1;31mFAIL\x1b[0m \x1b[31m{d}\x1b[0m " ++ "\x1b[1;32mDONE\x1b[0m \x1b[32m{d}/{d}\x1b[0m " ++ "\x1b[1;37mPEND\x1b[0m \x1b[37m{d}\x1b[0m " ++ "\x1b[1;35mTOTAL\x1b[0m {s}{d: >3}%\x1b[0m \x1b[90m({d}/{d})\x1b[0m\n",
             .{
                 running_count,
                 failed_count,
@@ -479,8 +479,7 @@ fn renderProgress(tracker: *ProgressTracker, ui: *const ui_mod.Ui, prev_lines: *
             const done_part = bar[0..filled];
             const pct_color = percentColor(pct);
             try out.print(
-                "{s}{s}\x1b[0m \x1b[1;37m{s: <20}\x1b[0m "
-                ++ "[{s}{s}\x1b[0m\x1b[90m{s}\x1b[0m] {s}{d: >3}%\x1b[0m \x1b[90m({d}/{d})\x1b[0m\n",
+                "{s}{s}\x1b[0m \x1b[1;37m{s: <20}\x1b[0m " ++ "[{s}{s}\x1b[0m\x1b[90m{s}\x1b[0m] {s}{d: >3}%\x1b[0m \x1b[90m({d}/{d})\x1b[0m\n",
                 .{ status_color, status, name, fill_color, done_part, remain, pct_color, pct, done, entry.total_ops },
             );
         } else {
@@ -511,7 +510,7 @@ const Header = struct {
     metadata_signature_len: u64 = 0,
 };
 
-fn readHeader(file: std.Io.File, io: std.Io) !Header {
+fn readHeader(file: std.Io.File, io: std.Io) Error!Header {
     const magic = try readAtAlloc(std.heap.page_allocator, file, io, 0, 4);
     defer std.heap.page_allocator.free(magic);
     if (!std.mem.eql(u8, magic, "CrAU")) return error.InvalidMagic;
@@ -529,23 +528,23 @@ fn readHeader(file: std.Io.File, io: std.Io) !Header {
     };
 }
 
-fn readU64Be(file: std.Io.File, io: std.Io, off: u64) !u64 {
+fn readU64Be(file: std.Io.File, io: std.Io, off: u64) Error!u64 {
     var buf: [8]u8 = undefined;
-    _ = try file.readPositionalAll(io, &buf, off);
+    _ = file.readPositionalAll(io, &buf, off) catch return error.IoFailure;
     return std.mem.readInt(u64, &buf, .big);
 }
 
-fn readU32Be(file: std.Io.File, io: std.Io, off: u64) !u32 {
+fn readU32Be(file: std.Io.File, io: std.Io, off: u64) Error!u32 {
     var buf: [4]u8 = undefined;
-    _ = try file.readPositionalAll(io, &buf, off);
+    _ = file.readPositionalAll(io, &buf, off) catch return error.IoFailure;
     return std.mem.readInt(u32, &buf, .big);
 }
 
-fn readAtAlloc(allocator: std.mem.Allocator, file: std.Io.File, io: std.Io, off: u64, len_u64: u64) ![]u8 {
+fn readAtAlloc(allocator: std.mem.Allocator, file: std.Io.File, io: std.Io, off: u64, len_u64: u64) Error![]u8 {
     const len = std.math.cast(usize, len_u64) orelse return error.IntegerOverflow;
     const buf = try allocator.alloc(u8, len);
     errdefer allocator.free(buf);
-    _ = try file.readPositionalAll(io, buf, off);
+    _ = file.readPositionalAll(io, buf, off) catch return error.IoFailure;
     return buf;
 }
 
@@ -558,27 +557,77 @@ fn sumExtentBytes(ctx: upb.Context, pidx: usize, oidx: usize, extent_count: usiz
     return @intCast(total);
 }
 
-fn copyToExtents(
+const ExtentCursor = struct {
     ctx: upb.Context,
     pidx: usize,
     oidx: usize,
     extent_count: usize,
     fw: *std.Io.File.Writer,
-    data: []const u8,
-) !void {
-    var read_off: usize = 0;
-    var eidx: usize = 0;
-    while (eidx < extent_count) : (eidx += 1) {
-        const extent_off = ctx.dstExtentStartBlock(pidx, oidx, eidx) * block_size;
-        const extent_len_u64 = ctx.dstExtentNumBlocks(pidx, oidx, eidx) * block_size;
-        const extent_len: usize = @intCast(extent_len_u64);
-        if (read_off + extent_len > data.len) return error.UnexpectedBytesWritten;
-        try fw.seekTo(extent_off);
-        try fw.interface.writeAll(data[read_off .. read_off + extent_len]);
-        read_off += extent_len;
+    extent_idx: usize = 0,
+    extent_written: u64 = 0,
+    total_written: u64 = 0,
+    expected_total: u64 = 0,
+
+    fn init(
+        ctx: upb.Context,
+        pidx: usize,
+        oidx: usize,
+        extent_count: usize,
+        expected_total: usize,
+        fw: *std.Io.File.Writer,
+    ) ExtentCursor {
+        return .{
+            .ctx = ctx,
+            .pidx = pidx,
+            .oidx = oidx,
+            .extent_count = extent_count,
+            .fw = fw,
+            .expected_total = @intCast(expected_total),
+        };
     }
-    if (read_off != data.len) return error.UnexpectedBytesWritten;
-}
+
+    fn currentExtentLen(self: ExtentCursor) u64 {
+        return self.ctx.dstExtentNumBlocks(self.pidx, self.oidx, self.extent_idx) * block_size;
+    }
+
+    pub fn writeAll(self: *ExtentCursor, data: []const u8) Error!void {
+        var pos: usize = 0;
+        while (pos < data.len) {
+            if (self.extent_idx >= self.extent_count) return error.UnexpectedBytesWritten;
+
+            const extent_off = self.ctx.dstExtentStartBlock(self.pidx, self.oidx, self.extent_idx) * block_size;
+            const extent_len = self.currentExtentLen();
+            if (self.extent_written >= extent_len) {
+                self.extent_idx += 1;
+                self.extent_written = 0;
+                continue;
+            }
+
+            const remain: usize = @intCast(extent_len - self.extent_written);
+            const n = @min(remain, data.len - pos);
+            self.fw.seekTo(extent_off + self.extent_written) catch return error.IoFailure;
+            self.fw.interface.writeAll(data[pos .. pos + n]) catch return error.IoFailure;
+            pos += n;
+            self.extent_written += n;
+            self.total_written += n;
+            if (self.extent_written == extent_len) {
+                self.extent_idx += 1;
+                self.extent_written = 0;
+            }
+        }
+    }
+
+    fn finish(self: *ExtentCursor) Error!void {
+        if (self.total_written != self.expected_total) return error.UnexpectedBytesWritten;
+        if (self.extent_idx < self.extent_count) {
+            var idx = self.extent_idx;
+            if (self.extent_written != 0) return error.UnexpectedBytesWritten;
+            while (idx < self.extent_count) : (idx += 1) {
+                if (self.ctx.dstExtentNumBlocks(self.pidx, self.oidx, idx) != 0) return error.UnexpectedBytesWritten;
+            }
+        }
+    }
+};
 
 fn writeZeroToExtents(
     allocator: std.mem.Allocator,
@@ -586,27 +635,22 @@ fn writeZeroToExtents(
     pidx: usize,
     oidx: usize,
     extent_count: usize,
-    fw: *std.Io.File.Writer,
-) !void {
+    cursor: *ExtentCursor,
+) Error!void {
+    _ = ctx;
+    _ = pidx;
+    _ = oidx;
+    _ = extent_count;
     const chunk = try allocator.alloc(u8, 1024 * 1024);
     defer allocator.free(chunk);
     @memset(chunk, 0);
 
-    var eidx: usize = 0;
-    while (eidx < extent_count) : (eidx += 1) {
-        const extent_off = ctx.dstExtentStartBlock(pidx, oidx, eidx) * block_size;
-        var remaining: u64 = ctx.dstExtentNumBlocks(pidx, oidx, eidx) * block_size;
-        var write_off: u64 = 0;
-        while (remaining > 0) {
-            const n: usize = @intCast(@min(remaining, chunk.len));
-            try fw.seekTo(extent_off + write_off);
-            try fw.interface.writeAll(chunk[0..n]);
-            remaining -= n;
-            write_off += n;
-        }
+    var remaining = cursor.expected_total;
+    while (remaining > 0) {
+        const n: usize = @intCast(@min(remaining, chunk.len));
+        try cursor.writeAll(chunk[0..n]);
+        remaining -= n;
     }
-
-    try fw.flush();
 }
 
 fn containsPartition(parts: []const []const u8, name: []const u8) bool {
@@ -614,4 +658,103 @@ fn containsPartition(parts: []const []const u8, name: []const u8) bool {
         if (std.mem.eql(u8, part, name)) return true;
     }
     return false;
+}
+
+fn hashFileAtPath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![32]u8 {
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+
+    const stat = try file.stat(io);
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    var buf = try allocator.alloc(u8, 128 * 1024);
+    defer allocator.free(buf);
+
+    var off: u64 = 0;
+    while (off < stat.size) {
+        const n: usize = @intCast(@min(stat.size - off, buf.len));
+        _ = try file.readPositionalAll(io, buf[0..n], off);
+        hasher.update(buf[0..n]);
+        off += n;
+    }
+
+    var out: [32]u8 = undefined;
+    hasher.final(&out);
+    return out;
+}
+
+fn assertFileHashEqual(allocator: std.mem.Allocator, io: std.Io, expected_path: []const u8, actual_path: []const u8) !void {
+    const expected_hash = try hashFileAtPath(allocator, io, expected_path);
+    const actual_hash = try hashFileAtPath(allocator, io, actual_path);
+    try std.testing.expectEqualSlices(u8, &expected_hash, &actual_hash);
+}
+
+test "integration selected partitions match go baseline" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/out", .{tmp.sub_path});
+    defer allocator.free(out_dir);
+    try std.Io.Dir.cwd().createDirPath(io, out_dir);
+
+    var out_buf: [64]u8 = undefined;
+    var err_buf: [64]u8 = undefined;
+    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
+    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
+    var ui = ui_mod.Ui.init(&out_discard.writer, &err_discard.writer, .never, false);
+    var p = try Payload.open(allocator, io, "testdata/payload.bin");
+    defer p.deinit();
+    try p.init();
+    try p.extractSelected(out_dir, &.{ "boot", "vbmeta", "vendor_boot" }, 2, &ui);
+
+    const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
+    defer allocator.free(boot_out);
+    const vbmeta_out = try std.fmt.allocPrint(allocator, "{s}/vbmeta.img", .{out_dir});
+    defer allocator.free(vbmeta_out);
+    const vendor_boot_out = try std.fmt.allocPrint(allocator, "{s}/vendor_boot.img", .{out_dir});
+    defer allocator.free(vendor_boot_out);
+
+    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/boot.img", boot_out);
+    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vbmeta.img", vbmeta_out);
+    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vendor_boot.img", vendor_boot_out);
+}
+
+test "invalid magic payload returns InvalidMagic" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const bad_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/bad_payload.bin", .{tmp.sub_path});
+    defer allocator.free(bad_path);
+    {
+        var f = try std.Io.Dir.cwd().createFile(io, bad_path, .{ .truncate = true });
+        defer f.close(io);
+        var wbuf: [32]u8 = undefined;
+        var w = f.writer(io, &wbuf);
+        try w.interface.writeAll("BAD!");
+        try w.flush();
+    }
+
+    var p = try Payload.open(allocator, io, bad_path);
+    defer p.deinit();
+    try std.testing.expectError(error.InvalidMagic, p.init());
+}
+
+test "invalid concurrency returns InvalidConcurrency" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var out_buf: [64]u8 = undefined;
+    var err_buf: [64]u8 = undefined;
+    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
+    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
+    var ui = ui_mod.Ui.init(&out_discard.writer, &err_discard.writer, .never, false);
+
+    var p = try Payload.open(allocator, io, "testdata/payload.bin");
+    defer p.deinit();
+    try p.init();
+    try std.testing.expectError(error.InvalidConcurrency, p.extractAll(".zig-cache", 0, &ui));
 }

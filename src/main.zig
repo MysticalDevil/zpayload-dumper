@@ -1,6 +1,12 @@
 const std = @import("std");
+const errors = @import("errors.zig");
 const payload = @import("payload.zig");
 const ui_mod = @import("cli_ui.zig");
+const c = @cImport({
+    @cInclude("time.h");
+});
+
+const Error = errors.AppError;
 
 const CliOptions = struct {
     allocator: std.mem.Allocator,
@@ -22,7 +28,7 @@ const CliOptions = struct {
     }
 };
 
-pub fn main(init: std.process.Init) !void {
+pub fn main(init: std.process.Init) Error!void {
     const gpa = init.gpa;
     const io = init.io;
     const arena = init.arena.allocator();
@@ -34,7 +40,7 @@ pub fn main(init: std.process.Init) !void {
     const err_writer = &stderr.interface;
     const out_writer = &stdout.interface;
 
-    const argv = try init.minimal.args.toSlice(arena);
+    const argv = init.minimal.args.toSlice(arena) catch return error.IoFailure;
 
     var opts = parseArgs(gpa, argv, out_writer, err_writer) catch |err| switch (err) {
         error.Usage, error.HelpDisplayed => return,
@@ -49,7 +55,7 @@ pub fn main(init: std.process.Init) !void {
     var ui = ui_mod.Ui.init(out_writer, err_writer, opts.color_mode, auto_color);
 
     if (opts.concurrency < 1) {
-        try ui.fail("invalid concurrency {d}: must be >= 1", .{opts.concurrency});
+        ui.fail("invalid concurrency {d}: must be >= 1", .{opts.concurrency}) catch return error.IoFailure;
         return error.InvalidConcurrency;
     }
 
@@ -66,25 +72,25 @@ pub fn main(init: std.process.Init) !void {
     var effective_payload = opts.input.?;
     const tmp_base = init.environ_map.get("TMPDIR") orelse "/tmp";
     if (std.mem.endsWith(u8, effective_payload, ".zip")) {
-        try ui.warn("zip input detected, extracting payload.bin first", .{});
+        ui.warn("zip input detected, extracting payload.bin first", .{}) catch return error.IoFailure;
         const extracted = try extractPayloadBinFromZip(gpa, io, tmp_base, effective_payload);
         cleanup_tmp_dir = extracted.temp_dir;
         cleanup_payload_path = extracted.payload_path;
         effective_payload = extracted.payload_path;
     }
 
-    try ui.info("input: {s}", .{effective_payload});
+    ui.info("input: {s}", .{effective_payload}) catch return error.IoFailure;
 
     var dumper = try payload.Payload.open(gpa, io, effective_payload);
     defer dumper.deinit();
     try dumper.init();
 
     const partition_count = try dumper.partitionCount();
-    try ui.info("manifest parsed, partitions: {d}", .{partition_count});
+    ui.info("manifest parsed, partitions: {d}", .{partition_count}) catch return error.IoFailure;
     try dumper.printPartitionList(out_writer);
 
     if (opts.list) {
-        try ui.success("list mode complete", .{});
+        ui.success("list mode complete", .{}) catch return error.IoFailure;
         return;
     }
 
@@ -96,9 +102,9 @@ pub fn main(init: std.process.Init) !void {
         owned_output = dir;
         break :blk dir;
     };
-    try std.Io.Dir.cwd().createDirPath(io, output_dir);
-    try ui.info("output dir: {s}", .{output_dir});
-    try ui.info("workers: {d}", .{opts.concurrency});
+    std.Io.Dir.cwd().createDirPath(io, output_dir) catch return error.IoFailure;
+    ui.info("output dir: {s}", .{output_dir}) catch return error.IoFailure;
+    ui.info("workers: {d}", .{opts.concurrency}) catch return error.IoFailure;
 
     if (opts.partitions) |parts_csv| {
         var list = std.array_list.Managed([]const u8).init(gpa);
@@ -108,14 +114,14 @@ pub fn main(init: std.process.Init) !void {
         while (it.next()) |part| {
             if (part.len != 0) try list.append(part);
         }
-        try ui.info("extracting selected partitions: {s}", .{parts_csv});
+        ui.info("extracting selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
         try dumper.extractSelected(output_dir, list.items, @intCast(opts.concurrency), &ui);
     } else {
-        try ui.info("extracting all partitions", .{});
+        ui.info("extracting all partitions", .{}) catch return error.IoFailure;
         try dumper.extractAll(output_dir, @intCast(opts.concurrency), &ui);
     }
 
-    try ui.success("extraction complete", .{});
+    ui.success("extraction complete", .{}) catch return error.IoFailure;
 }
 
 fn parseArgs(
@@ -123,7 +129,7 @@ fn parseArgs(
     args: []const []const u8,
     out: *std.Io.Writer,
     err_out: *std.Io.Writer,
-) !CliOptions {
+) Error!CliOptions {
     var opts = CliOptions.init(allocator);
     errdefer opts.deinit();
 
@@ -172,13 +178,13 @@ fn parseArgs(
             }
 
             if (std.mem.startsWith(u8, arg, "--concurrency=")) {
-                opts.concurrency = try std.fmt.parseInt(i32, arg["--concurrency=".len..], 10);
+                opts.concurrency = std.fmt.parseInt(i32, arg["--concurrency=".len..], 10) catch return error.Usage;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--concurrency")) {
                 i += 1;
                 if (i >= args.len) return usage(err_out);
-                opts.concurrency = try std.fmt.parseInt(i32, args[i], 10);
+                opts.concurrency = std.fmt.parseInt(i32, args[i], 10) catch return error.Usage;
                 continue;
             }
 
@@ -196,12 +202,12 @@ fn parseArgs(
     return opts;
 }
 
-fn replaceOwned(allocator: std.mem.Allocator, slot: *?[]u8, value: []const u8) !void {
+fn replaceOwned(allocator: std.mem.Allocator, slot: *?[]u8, value: []const u8) Error!void {
     if (slot.*) |old| allocator.free(old);
     slot.* = try allocator.dupe(u8, value);
 }
 
-fn usage(err_out: *std.Io.Writer) error{Usage} {
+fn usage(err_out: *std.Io.Writer) Error {
     err_out.writeAll(
         \\Usage: zpayload-dumper [options] <payload.bin|payload.zip>
         \\Try: zpayload-dumper --help
@@ -213,7 +219,7 @@ fn usage(err_out: *std.Io.Writer) error{Usage} {
 }
 
 fn help(out: *std.Io.Writer) !void {
-    try out.writeAll(
+    out.writeAll(
         \\zpayload-dumper - Android payload.bin extractor
         \\
         \\Usage:
@@ -236,7 +242,7 @@ fn help(out: *std.Io.Writer) !void {
         \\Supported operations:
         \\  REPLACE, REPLACE_XZ, REPLACE_BZ, ZSTD, ZERO
         \\
-    );
+    ) catch return error.IoFailure;
 }
 
 const ZipExtractResult = struct {
@@ -244,29 +250,29 @@ const ZipExtractResult = struct {
     payload_path: []u8,
 };
 
-fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_base: []const u8, zip_path: []const u8) !ZipExtractResult {
+fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_base: []const u8, zip_path: []const u8) Error!ZipExtractResult {
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
     const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ tmp_base, nonce });
-    try std.Io.Dir.createDirAbsolute(io, dir_path, .default_dir);
+    std.Io.Dir.createDirAbsolute(io, dir_path, .default_dir) catch return error.IoFailure;
 
-    var zip_file = try std.Io.Dir.cwd().openFile(io, zip_path, .{});
+    var zip_file = std.Io.Dir.cwd().openFile(io, zip_path, .{}) catch return error.InvalidZipArchive;
     defer zip_file.close(io);
 
     var reader_buf: [4096]u8 = undefined;
     var fr = zip_file.reader(io, &reader_buf);
-    var iter = try std.zip.Iterator.init(&fr);
+    var iter = std.zip.Iterator.init(&fr) catch return error.InvalidZipArchive;
     var filename_buf: [std.fs.max_path_bytes]u8 = undefined;
 
-    var temp_dir = try std.Io.Dir.openDirAbsolute(io, dir_path, .{});
+    var temp_dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{}) catch return error.IoFailure;
     defer temp_dir.close(io);
 
-    while (try iter.next()) |entry| {
-        try fr.seekTo(entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader));
+    while (iter.next() catch return error.InvalidZipArchive) |entry| {
+        fr.seekTo(entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader)) catch return error.InvalidZipArchive;
         const name = filename_buf[0..entry.filename_len];
-        try fr.interface.readSliceAll(name);
+        fr.interface.readSliceAll(name) catch return error.InvalidZipArchive;
         if (std.mem.eql(u8, name, "payload.bin")) {
-            try entry.extract(&fr, .{}, &filename_buf, temp_dir);
+            entry.extract(&fr, .{}, &filename_buf, temp_dir) catch return error.InvalidZipArchive;
             const payload_path = try std.fmt.allocPrint(allocator, "{s}/payload.bin", .{dir_path});
             return .{ .temp_dir = dir_path, .payload_path = payload_path };
         }
@@ -276,25 +282,23 @@ fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_base: 
     return error.PayloadNotFoundInZip;
 }
 
-fn makeDefaultOutputDirectory(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
-    const now = std.Io.Timestamp.now(io, .real).toSeconds();
-    if (now < 0) return error.InvalidSystemTime;
+fn makeDefaultOutputDirectory(allocator: std.mem.Allocator, io: std.Io) Error![]u8 {
+    _ = io;
+    var now = c.time(null);
+    if (now < 0) return error.TimeUnavailable;
+    var tm_buf: c.struct_tm = undefined;
+    if (c.localtime_r(&now, &tm_buf) == null) return error.TimeUnavailable;
 
-    const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @intCast(now) };
-    const year_day = epoch_seconds.getEpochDay().calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const day_secs = epoch_seconds.getDaySeconds();
-
-    const year: u16 = year_day.year;
-    const month: u4 = month_day.month.numeric();
-    const day: u5 = month_day.day_index + 1;
-    const hour: u5 = day_secs.getHoursIntoDay();
-    const minute: u6 = day_secs.getMinutesIntoHour();
-    const second: u6 = day_secs.getSecondsIntoMinute();
+    const year: i32 = tm_buf.tm_year + 1900;
+    const month: i32 = tm_buf.tm_mon + 1;
+    const day: i32 = tm_buf.tm_mday;
+    const hour: i32 = tm_buf.tm_hour;
+    const minute: i32 = tm_buf.tm_min;
+    const second: i32 = tm_buf.tm_sec;
 
     var buf: [64]u8 = undefined;
-    const dir = try std.fmt.bufPrint(&buf, "extracted_{d:0>4}{d:0>2}{d:0>2}_{d:0>2}{d:0>2}{d:0>2}", .{
+    const dir = std.fmt.bufPrint(&buf, "extracted_{d:0>4}{d:0>2}{d:0>2}_{d:0>2}{d:0>2}{d:0>2}", .{
         year, month, day, hour, minute, second,
-    });
+    }) catch return error.IoFailure;
     return try allocator.dupe(u8, dir);
 }
