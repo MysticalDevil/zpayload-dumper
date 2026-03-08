@@ -1,6 +1,8 @@
 const std = @import("std");
-const payload = @import("payload.zig");
-const ui_mod = @import("cli_ui.zig");
+const app = @import("zpayload");
+
+const default_bench_payload = app.fixtures.sample_payload_path;
+const bench_partitions = &app.fixtures.selected_triplet;
 
 fn defaultOutputDir(gpa: std.mem.Allocator, io: std.Io) ![]u8 {
     var nonce: u64 = undefined;
@@ -32,14 +34,18 @@ pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
 
-    const payload_path = if (args.len >= 2) args[1] else "tests/data/generated/smoke1/payload.bin";
-    const partitions: []const []const u8 = &.{ "boot", "vbmeta", "vendor_boot" };
+    const payload_path = if (args.len >= 2) args[1] else default_bench_payload;
+    const partitions: []const []const u8 = bench_partitions;
     const concurrencies = [_]usize{ 1, 4 };
 
     var out_file = std.Io.File.stdout();
     var out = out_file.writer(io, &.{});
     try out.interface.print("[INFO] bench payload: {s}\n", .{payload_path});
-    try out.interface.print("[INFO] partitions: boot,vbmeta,vendor_boot\n", .{});
+    try out.interface.print("[INFO] partitions: {s},{s},{s}\n", .{
+        app.fixtures.selected_triplet[0],
+        app.fixtures.selected_triplet[1],
+        app.fixtures.selected_triplet[2],
+    });
     try out.interface.print("[INFO] runs: concurrency=1,4\n", .{});
 
     for (concurrencies) |c| {
@@ -52,10 +58,10 @@ pub fn main(init: std.process.Init) !void {
         var err_buf: [64]u8 = undefined;
         var out_discard = std.Io.Writer.Discarding.init(&out_buf);
         var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-        var ui = ui_mod.Ui.init(&out_discard.writer, &err_discard.writer, .never, false);
+        var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
 
         const start = std.Io.Timestamp.now(io, .real).toNanoseconds();
-        var p = try payload.Payload.open(gpa, io, payload_path);
+        var p = try app.payload.Payload.open(gpa, io, payload_path);
         defer p.deinit();
         try p.init();
         try p.extractSelected(out_dir, partitions, c, &ui);

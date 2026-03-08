@@ -21,6 +21,10 @@ fn attachPayloadDeps(b: *std.Build, module: *std.Build.Module, upb_out: std.Buil
     module.linkSystemLibrary("zstd", .{});
 }
 
+fn attachIntegrationImport(module: *std.Build.Module, zpayload_mod: *std.Build.Module) void {
+    module.addImport("zpayload", zpayload_mod);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -38,6 +42,13 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     attachPayloadDeps(b, root_module, upb_out, minitable_out);
+    const zpayload_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    attachPayloadDeps(b, zpayload_mod, upb_out, minitable_out);
 
     const exe = b.addExecutable(.{
         .name = "zpayload-dumper",
@@ -55,12 +66,12 @@ pub fn build(b: *std.Build) void {
     });
     const run_tests = b.addRunArtifact(unit_tests);
     const integration_module = b.createModule(.{
-        .root_source_file = b.path("src/integration_tests.zig"),
+        .root_source_file = b.path("tests/itest.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    attachPayloadDeps(b, integration_module, upb_out, minitable_out);
+    attachIntegrationImport(integration_module, zpayload_mod);
     const integration_tests = b.addTest(.{
         .root_module = integration_module,
     });
@@ -70,12 +81,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_integration.step);
 
     const stress_module = b.createModule(.{
-        .root_source_file = b.path("src/stress_tests.zig"),
+        .root_source_file = b.path("tests/stress_tests.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    attachPayloadDeps(b, stress_module, upb_out, minitable_out);
+    attachIntegrationImport(stress_module, zpayload_mod);
     const stress_tests = b.addTest(.{
         .root_module = stress_module,
     });
@@ -84,12 +95,12 @@ pub fn build(b: *std.Build) void {
     stress_step.dependOn(&run_stress.step);
 
     const e2e_module = b.createModule(.{
-        .root_source_file = b.path("src/e2e_check.zig"),
+        .root_source_file = b.path("tests/e2e_check.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    attachPayloadDeps(b, e2e_module, upb_out, minitable_out);
+    attachIntegrationImport(e2e_module, zpayload_mod);
     const e2e_exe = b.addExecutable(.{
         .name = "zpayload-e2e-check",
         .root_module = e2e_module,
@@ -100,12 +111,12 @@ pub fn build(b: *std.Build) void {
     e2e_step.dependOn(&run_e2e.step);
 
     const bench_module = b.createModule(.{
-        .root_source_file = b.path("src/bench_smoke.zig"),
+        .root_source_file = b.path("tests/bench_smoke.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    attachPayloadDeps(b, bench_module, upb_out, minitable_out);
+    attachIntegrationImport(bench_module, zpayload_mod);
     const bench_exe = b.addExecutable(.{
         .name = "zpayload-bench-smoke",
         .root_module = bench_module,
