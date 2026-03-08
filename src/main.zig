@@ -4,7 +4,6 @@ const ui_mod = @import("cli_ui.zig");
 
 const CliOptions = struct {
     allocator: std.mem.Allocator,
-    args: [][:0]u8,
     list: bool = false,
     partitions: ?[]u8 = null,
     output: ?[]u8 = null,
@@ -12,38 +11,42 @@ const CliOptions = struct {
     input: ?[]u8 = null,
     color_mode: ui_mod.ColorMode = .auto,
 
-    fn init(allocator: std.mem.Allocator, args: [][:0]u8) CliOptions {
-        return .{
-            .allocator = allocator,
-            .args = args,
-        };
+    fn init(allocator: std.mem.Allocator) CliOptions {
+        return .{ .allocator = allocator };
     }
 
     fn deinit(self: *CliOptions) void {
         if (self.partitions) |v| self.allocator.free(v);
         if (self.output) |v| self.allocator.free(v);
         if (self.input) |v| self.allocator.free(v);
-        std.process.argsFree(self.allocator, self.args);
     }
 };
 
-pub fn main() !void {
-    var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa_state.deinit();
-    const gpa = gpa_state.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+    const arena = init.arena.allocator();
 
-    var stderr = std.fs.File.stderr().writer(&.{});
-    var stdout = std.fs.File.stdout().writer(&.{});
+    var stderr_file = std.Io.File.stderr();
+    var stdout_file = std.Io.File.stdout();
+    var stderr = stderr_file.writer(io, &.{});
+    var stdout = stdout_file.writer(io, &.{});
     const err_writer = &stderr.interface;
     const out_writer = &stdout.interface;
 
-    var opts = parseArgs(gpa, out_writer, err_writer) catch |err| switch (err) {
+    const argv = try init.minimal.args.toSlice(arena);
+
+    var opts = parseArgs(gpa, argv, out_writer, err_writer) catch |err| switch (err) {
         error.Usage, error.HelpDisplayed => return,
         else => return err,
     };
     defer opts.deinit();
 
-    var ui = ui_mod.Ui.init(out_writer, err_writer, opts.color_mode);
+    const auto_color = stdout_file.isTty(io) catch |err| blk: {
+        std.log.warn("failed to detect tty for color auto mode: {}", .{err});
+        break :blk false;
+    };
+    var ui = ui_mod.Ui.init(out_writer, err_writer, opts.color_mode, auto_color);
 
     if (opts.concurrency < 1) {
         try ui.fail("invalid concurrency {d}: must be >= 1", .{opts.concurrency});
@@ -54,14 +57,17 @@ pub fn main() !void {
     var cleanup_payload_path: ?[]u8 = null;
     defer if (cleanup_payload_path) |path| gpa.free(path);
     defer if (cleanup_tmp_dir) |path| {
-        std.fs.deleteTreeAbsolute(path) catch {};
+        std.Io.Dir.cwd().deleteTree(io, path) catch |err| {
+            std.log.warn("failed to cleanup temporary directory '{s}': {}", .{ path, err });
+        };
         gpa.free(path);
     };
 
     var effective_payload = opts.input.?;
+    const tmp_base = init.environ_map.get("TMPDIR") orelse "/tmp";
     if (std.mem.endsWith(u8, effective_payload, ".zip")) {
         try ui.warn("zip input detected, extracting payload.bin first", .{});
-        const extracted = try extractPayloadBinFromZip(gpa, effective_payload);
+        const extracted = try extractPayloadBinFromZip(gpa, io, tmp_base, effective_payload);
         cleanup_tmp_dir = extracted.temp_dir;
         cleanup_payload_path = extracted.payload_path;
         effective_payload = extracted.payload_path;
@@ -69,7 +75,7 @@ pub fn main() !void {
 
     try ui.info("input: {s}", .{effective_payload});
 
-    var dumper = try payload.Payload.open(gpa, effective_payload);
+    var dumper = try payload.Payload.open(gpa, io, effective_payload);
     defer dumper.deinit();
     try dumper.init();
 
@@ -86,13 +92,13 @@ pub fn main() !void {
     defer if (owned_output) |dir| gpa.free(dir);
 
     const output_dir = if (opts.output) |dir| dir else blk: {
-        const dir = try makeDefaultOutputDirectory(gpa);
+        const dir = try makeDefaultOutputDirectory(gpa, io);
         owned_output = dir;
         break :blk dir;
     };
-    try std.fs.cwd().makePath(output_dir);
+    try std.Io.Dir.cwd().createDirPath(io, output_dir);
     try ui.info("output dir: {s}", .{output_dir});
-    try ui.info("workers: {d} (serial mode currently)", .{opts.concurrency});
+    try ui.info("workers: {d}", .{opts.concurrency});
 
     if (opts.partitions) |parts_csv| {
         var list = std.array_list.Managed([]const u8).init(gpa);
@@ -103,10 +109,10 @@ pub fn main() !void {
             if (part.len != 0) try list.append(part);
         }
         try ui.info("extracting selected partitions: {s}", .{parts_csv});
-        try dumper.extractSelected(output_dir, list.items);
+        try dumper.extractSelected(output_dir, list.items, @intCast(opts.concurrency), &ui);
     } else {
         try ui.info("extracting all partitions", .{});
-        try dumper.extractAll(output_dir);
+        try dumper.extractAll(output_dir, @intCast(opts.concurrency), &ui);
     }
 
     try ui.success("extraction complete", .{});
@@ -114,14 +120,14 @@ pub fn main() !void {
 
 fn parseArgs(
     allocator: std.mem.Allocator,
+    args: []const []const u8,
     out: *std.Io.Writer,
     err_out: *std.Io.Writer,
 ) !CliOptions {
-    const args = try std.process.argsAlloc(allocator);
-    var opts = CliOptions.init(allocator, args);
+    var opts = CliOptions.init(allocator);
     errdefer opts.deinit();
 
-    var i: usize = 1;
+    var i: usize = 1; // argv0
     while (i < args.len) : (i += 1) {
         const arg = args[i];
 
@@ -200,13 +206,15 @@ fn usage(err_out: *std.Io.Writer) error{Usage} {
         \\Usage: zpayload-dumper [options] <payload.bin|payload.zip>
         \\Try: zpayload-dumper --help
         \\
-    ) catch {};
+    ) catch |err| {
+        std.log.warn("failed to write usage text: {}", .{err});
+    };
     return error.Usage;
 }
 
 fn help(out: *std.Io.Writer) !void {
     try out.writeAll(
-        \\zpayload-dumper - Android payload.bin extractor (serial mode)
+        \\zpayload-dumper - Android payload.bin extractor
         \\
         \\Usage:
         \\  zpayload-dumper [options] <payload.bin|payload.zip>
@@ -216,7 +224,7 @@ fn help(out: *std.Io.Writer) !void {
         \\  -l, --list                 Show partition list only
         \\  -p, --partitions <csv>     Extract selected partitions
         \\  -o, --output <dir>         Output directory
-        \\  -c, --concurrency <n>      Compatibility flag, must be >= 1
+        \\  -c, --concurrency <n>      Number of parallel partition workers
         \\      --color                Force colored output
         \\      --no-color             Disable colored output
         \\
@@ -236,24 +244,22 @@ const ZipExtractResult = struct {
     payload_path: []u8,
 };
 
-fn extractPayloadBinFromZip(allocator: std.mem.Allocator, zip_path: []const u8) !ZipExtractResult {
-    const tmp_base_owned = std.process.getEnvVarOwned(allocator, "TMPDIR") catch null;
-    defer if (tmp_base_owned) |v| allocator.free(v);
-    const tmp_base = if (tmp_base_owned) |v| v else "/tmp";
+fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_base: []const u8, zip_path: []const u8) !ZipExtractResult {
+    var nonce: u64 = undefined;
+    io.random(std.mem.asBytes(&nonce));
+    const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ tmp_base, nonce });
+    try std.Io.Dir.createDirAbsolute(io, dir_path, .default_dir);
 
-    const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ tmp_base, std.time.nanoTimestamp() });
-    try std.fs.makeDirAbsolute(dir_path);
-
-    var zip_file = try std.fs.cwd().openFile(zip_path, .{});
-    defer zip_file.close();
+    var zip_file = try std.Io.Dir.cwd().openFile(io, zip_path, .{});
+    defer zip_file.close(io);
 
     var reader_buf: [4096]u8 = undefined;
-    var fr = zip_file.reader(&reader_buf);
+    var fr = zip_file.reader(io, &reader_buf);
     var iter = try std.zip.Iterator.init(&fr);
     var filename_buf: [std.fs.max_path_bytes]u8 = undefined;
 
-    var temp_dir = try std.fs.openDirAbsolute(dir_path, .{});
-    defer temp_dir.close();
+    var temp_dir = try std.Io.Dir.openDirAbsolute(io, dir_path, .{});
+    defer temp_dir.close(io);
 
     while (try iter.next()) |entry| {
         try fr.seekTo(entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader));
@@ -270,9 +276,25 @@ fn extractPayloadBinFromZip(allocator: std.mem.Allocator, zip_path: []const u8) 
     return error.PayloadNotFoundInZip;
 }
 
-fn makeDefaultOutputDirectory(allocator: std.mem.Allocator) ![]u8 {
-    var buf: [32]u8 = undefined;
-    const now = std.time.timestamp();
-    const dir = try std.fmt.bufPrint(&buf, "extracted_{d}", .{now});
+fn makeDefaultOutputDirectory(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
+    const now = std.Io.Timestamp.now(io, .real).toSeconds();
+    if (now < 0) return error.InvalidSystemTime;
+
+    const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @intCast(now) };
+    const year_day = epoch_seconds.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = epoch_seconds.getDaySeconds();
+
+    const year: u16 = year_day.year;
+    const month: u4 = month_day.month.numeric();
+    const day: u5 = month_day.day_index + 1;
+    const hour: u5 = day_secs.getHoursIntoDay();
+    const minute: u6 = day_secs.getMinutesIntoHour();
+    const second: u6 = day_secs.getSecondsIntoMinute();
+
+    var buf: [64]u8 = undefined;
+    const dir = try std.fmt.bufPrint(&buf, "extracted_{d:0>4}{d:0>2}{d:0>2}_{d:0>2}{d:0>2}{d:0>2}", .{
+        year, month, day, hour, minute, second,
+    });
     return try allocator.dupe(u8, dir);
 }
