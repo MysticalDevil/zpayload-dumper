@@ -5,7 +5,7 @@ const compress = @import("ffi/compress.zig");
 const ui_mod = @import("cli_ui.zig");
 
 pub const block_size: u64 = 4096;
-pub const Error = errors.AppError;
+pub const Error = errors.PayloadError || errors.DecodeError || errors.CompressError || errors.SystemError;
 
 pub const Payload = struct {
     allocator: std.mem.Allocator,
@@ -175,7 +175,7 @@ pub const Payload = struct {
                     _ = try compress.decompressBz2ToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
                 },
                 .zstd => {
-                    _ = try compress.decompressZstdToWriter(self.allocator, self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    _ = try compress.decompressZstdToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
                 },
                 .zero => {
                     var hash_buf: [1024 * 1024]u8 = undefined;

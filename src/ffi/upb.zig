@@ -5,7 +5,7 @@ const c = @cImport({
     @cInclude("upb_wrap.h");
 });
 
-pub const Error = errors.AppError;
+pub const Error = errors.DecodeError;
 
 pub const OperationType = enum(i32) {
     replace = 0,

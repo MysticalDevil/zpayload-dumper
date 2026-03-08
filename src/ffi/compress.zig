@@ -7,7 +7,7 @@ const c = @cImport({
     @cInclude("zstd.h");
 });
 
-pub const Error = errors.AppError;
+pub const Error = errors.CompressError || errors.SystemError;
 const chunk_size = 128 * 1024;
 
 pub fn copyRawToWriter(
@@ -89,7 +89,6 @@ pub fn decompressBz2ToWriter(
 }
 
 pub fn decompressZstdToWriter(
-    allocator: std.mem.Allocator,
     file: std.Io.File,
     io: std.Io,
     offset: u64,
@@ -102,7 +101,6 @@ pub fn decompressZstdToWriter(
 
     const dstream = c.ZSTD_createDStream() orelse return error.ZstdDecompressFailed;
     defer _ = c.ZSTD_freeDStream(dstream);
-    _ = allocator; // keep signature uniform with other stream decoders.
 
     if (c.ZSTD_isError(c.ZSTD_initDStream(dstream)) != 0) return error.ZstdDecompressFailed;
 

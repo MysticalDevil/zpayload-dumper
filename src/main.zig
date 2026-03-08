@@ -255,7 +255,7 @@ fn usage(err_out: *std.Io.Writer) Error {
     return error.Usage;
 }
 
-fn help(out: *std.Io.Writer) !void {
+fn help(out: *std.Io.Writer) Error!void {
     out.writeAll(
         \\zpayload-dumper - Android payload.bin extractor
         \\

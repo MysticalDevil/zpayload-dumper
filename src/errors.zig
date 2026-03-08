@@ -1,13 +1,13 @@
 pub const CliError = error{
     Usage,
     HelpDisplayed,
-    InvalidConcurrency,
     TimeUnavailable,
     InvalidZipArchive,
     PayloadNotFoundInZip,
 };
 
 pub const PayloadError = error{
+    InvalidConcurrency,
     ManifestNotInitialized,
     InvalidMagic,
     UnsupportedPayloadVersion,
