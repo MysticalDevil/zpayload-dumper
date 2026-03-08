@@ -118,11 +118,17 @@ pub const Payload = struct {
         }
 
         var prev_lines: usize = 0;
+        var last_render_ns: i96 = 0;
         while (completed_jobs.load(.acquire) < jobs.items.len) {
-            renderProgress(&tracker, ui, &prev_lines) catch |err| {
-                std.log.warn("failed to render progress: {}", .{err});
-            };
-            _ = try self.io.sleep(.fromNanoseconds(100 * std.time.ns_per_ms), .awake);
+            const now_ns = std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
+            const force_refresh = now_ns - last_render_ns >= 250 * std.time.ns_per_ms;
+            if (tracker.consumeDirty() or force_refresh) {
+                renderProgress(&tracker, ui, &prev_lines) catch |err| {
+                    std.log.warn("failed to render progress: {}", .{err});
+                };
+                last_render_ns = now_ns;
+            }
+            _ = try self.io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .awake);
         }
 
         for (threads) |thread| thread.join();
@@ -220,6 +226,7 @@ const PartitionProgress = struct {
 const ProgressTracker = struct {
     io: std.Io,
     mutex: std.Io.Mutex = .init,
+    dirty: std.atomic.Value(bool) = .init(true),
     entries: []PartitionProgress,
 
     fn init(allocator: std.mem.Allocator, io: std.Io, jobs: []const Job) !ProgressTracker {
@@ -244,6 +251,7 @@ const ProgressTracker = struct {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .running;
+        _ = self.dirty.swap(true, .release);
     }
 
     fn markDone(self: *ProgressTracker, idx: usize) void {
@@ -251,18 +259,27 @@ const ProgressTracker = struct {
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .done;
         self.entries[idx].done_ops = self.entries[idx].total_ops;
+        _ = self.dirty.swap(true, .release);
     }
 
     fn markFailed(self: *ProgressTracker, idx: usize) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .failed;
+        _ = self.dirty.swap(true, .release);
     }
 
     fn updateOps(self: *ProgressTracker, idx: usize, done_ops: usize) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
-        self.entries[idx].done_ops = done_ops;
+        if (self.entries[idx].done_ops != done_ops) {
+            self.entries[idx].done_ops = done_ops;
+            _ = self.dirty.swap(true, .release);
+        }
+    }
+
+    fn consumeDirty(self: *ProgressTracker) bool {
+        return self.dirty.swap(false, .acq_rel);
     }
 };
 
@@ -372,56 +389,120 @@ fn renderProgress(tracker: *ProgressTracker, ui: *const ui_mod.Ui, prev_lines: *
     tracker.mutex.lockUncancelable(tracker.io);
     defer tracker.mutex.unlock(tracker.io);
 
-    var lines: usize = 0;
-    for (tracker.entries) |entry| {
-        try out.writeAll("\x1b[2K\r");
+    var done_count: usize = 0;
+    var pending_count: usize = 0;
+    var running_count: usize = 0;
+    var failed_count: usize = 0;
+    const total_count: usize = tracker.entries.len;
+    var total_done_ops: usize = 0;
+    var total_ops: usize = 0;
 
+    for (tracker.entries) |entry| {
+        total_done_ops += @min(entry.done_ops, entry.total_ops);
+        total_ops += entry.total_ops;
+        switch (entry.state) {
+            .pending => pending_count += 1,
+            .running => running_count += 1,
+            .done => done_count += 1,
+            .failed => failed_count += 1,
+        }
+    }
+
+    var lines: usize = 0;
+    try out.writeAll("\x1b[2K\r");
+    const overall_pct: usize = if (total_ops == 0) 100 else (total_done_ops * 100) / total_ops;
+    if (ui.useColor()) {
+        const pct_color = percentColor(overall_pct);
+        try out.print(
+            "\x1b[1;36mACTIVE\x1b[0m \x1b[36m{d}\x1b[0m "
+            ++ "\x1b[1;31mFAIL\x1b[0m \x1b[31m{d}\x1b[0m "
+            ++ "\x1b[1;32mDONE\x1b[0m \x1b[32m{d}/{d}\x1b[0m "
+            ++ "\x1b[1;37mPEND\x1b[0m \x1b[37m{d}\x1b[0m "
+            ++ "\x1b[1;35mTOTAL\x1b[0m {s}{d: >3}%\x1b[0m \x1b[90m({d}/{d})\x1b[0m\n",
+            .{
+                running_count,
+                failed_count,
+                done_count,
+                total_count,
+                pending_count,
+                pct_color,
+                overall_pct,
+                total_done_ops,
+                total_ops,
+            },
+        );
+    } else {
+        try out.print("ACTIVE {d} FAIL {d} DONE {d}/{d} PEND {d} TOTAL {d: >3}% ({d}/{d})\n", .{
+            running_count,
+            failed_count,
+            done_count,
+            total_count,
+            pending_count,
+            overall_pct,
+            total_done_ops,
+            total_ops,
+        });
+    }
+    lines += 1;
+
+    for (tracker.entries) |entry| {
+        if (entry.state != .running and entry.state != .failed) continue;
+
+        try out.writeAll("\x1b[2K\r");
         const done = @min(entry.done_ops, entry.total_ops);
         const pct = if (entry.total_ops == 0) @as(u8, 100) else @as(u8, @intCast((done * 100) / entry.total_ops));
-        const bar_width = 24;
+        const bar_width = 20;
         const filled = if (entry.total_ops == 0) bar_width else (done * bar_width) / entry.total_ops;
         var bar: [bar_width]u8 = undefined;
         @memset(bar[0..], '-');
         var i: usize = 0;
         while (i < filled) : (i += 1) bar[i] = '=';
 
+        const name = if (entry.name.len > 20) entry.name[0..20] else entry.name;
         const status = switch (entry.state) {
-            .pending => "PEND",
             .running => "RUN ",
-            .done => "DONE",
             .failed => "FAIL",
+            else => unreachable,
         };
         if (ui.useColor()) {
-            const color = switch (entry.state) {
-                .pending => "\x1b[37m",
+            const status_color = switch (entry.state) {
                 .running => "\x1b[36m",
-                .done => "\x1b[32m",
                 .failed => "\x1b[31m",
+                else => unreachable,
             };
-            try out.print("{s}{s}\x1b[0m {s: <20} [{s}] {d: >3}% ({d}/{d})\n", .{
-                color,
-                status,
-                entry.name,
-                bar,
-                pct,
-                done,
-                entry.total_ops,
-            });
+            const fill_color = switch (entry.state) {
+                .running => "\x1b[32m",
+                .failed => "\x1b[31m",
+                else => unreachable,
+            };
+            const remain = bar[filled..];
+            const done_part = bar[0..filled];
+            const pct_color = percentColor(pct);
+            try out.print(
+                "{s}{s}\x1b[0m \x1b[1;37m{s: <20}\x1b[0m "
+                ++ "[{s}{s}\x1b[0m\x1b[90m{s}\x1b[0m] {s}{d: >3}%\x1b[0m \x1b[90m({d}/{d})\x1b[0m\n",
+                .{ status_color, status, name, fill_color, done_part, remain, pct_color, pct, done, entry.total_ops },
+            );
         } else {
             try out.print("{s} {s: <20} [{s}] {d: >3}% ({d}/{d})\n", .{
-                status,
-                entry.name,
-                bar,
-                pct,
-                done,
-                entry.total_ops,
+                status, name, bar, pct, done, entry.total_ops,
             });
         }
         lines += 1;
     }
 
-    prev_lines.* = lines;
+    while (lines < prev_lines.*) : (lines += 1) {
+        try out.writeAll("\x1b[2K\r\n");
+    }
+
+    prev_lines.* = @max(lines, prev_lines.*);
     try out.flush();
+}
+
+fn percentColor(pct: usize) []const u8 {
+    if (pct >= 80) return "\x1b[32m";
+    if (pct >= 50) return "\x1b[33m";
+    return "\x1b[31m";
 }
 
 const Header = struct {
