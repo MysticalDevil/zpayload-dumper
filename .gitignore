@@ -1,3 +1,4 @@
 .zig-cache/
 zig-out/
 payload-dumper-go/
+testdata/
