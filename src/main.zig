@@ -28,7 +28,20 @@ const CliOptions = struct {
     }
 };
 
-pub fn main(init: std.process.Init) Error!void {
+pub fn main(init: std.process.Init) !void {
+    run(init) catch |err| switch (err) {
+        error.Usage, error.HelpDisplayed => return,
+        else => {
+            const io = init.io;
+            var stderr_file = std.Io.File.stderr();
+            var stderr = stderr_file.writer(io, &.{});
+            stderr.interface.print("error: {s}\n", .{userMessage(err)}) catch {};
+            return err;
+        },
+    };
+}
+
+fn run(init: std.process.Init) Error!void {
     const gpa = init.gpa;
     const io = init.io;
     const arena = init.arena.allocator();
@@ -42,10 +55,7 @@ pub fn main(init: std.process.Init) Error!void {
 
     const argv = init.minimal.args.toSlice(arena) catch return error.IoFailure;
 
-    var opts = parseArgs(gpa, argv, out_writer, err_writer) catch |err| switch (err) {
-        error.Usage, error.HelpDisplayed => return,
-        else => return err,
-    };
+    var opts = try parseArgs(gpa, argv, out_writer, err_writer);
     defer opts.deinit();
 
     const auto_color = stdout_file.isTty(io) catch |err| blk: {
@@ -122,6 +132,33 @@ pub fn main(init: std.process.Init) Error!void {
     }
 
     ui.success("extraction complete", .{}) catch return error.IoFailure;
+}
+
+fn userMessage(err: Error) []const u8 {
+    return switch (err) {
+        error.InvalidConcurrency => "invalid concurrency, expected value >= 1",
+        error.InvalidZipArchive => "invalid zip archive or failed to read zip content",
+        error.PayloadNotFoundInZip => "payload.bin not found in zip archive",
+        error.InvalidMagic => "invalid payload magic, expected CrAU",
+        error.UnsupportedPayloadVersion => "unsupported payload version (expected 2)",
+        error.ManifestNotInitialized => "payload manifest is not initialized",
+        error.DecodeFailed => "failed to decode protobuf manifest/signature",
+        error.InvalidDstExtents => "invalid destination extents in operation",
+        error.UnhandledOperationType => "unsupported payload operation type",
+        error.DecompressedSizeMismatch => "decompressed size mismatch",
+        error.XzDecompressFailed => "xz decompression failed",
+        error.Bzip2DecompressFailed => "bzip2 decompression failed",
+        error.ZstdDecompressFailed => "zstd decompression failed",
+        error.UnexpectedBytesWritten => "unexpected bytes written during extraction",
+        error.ChecksumMismatch => "operation checksum mismatch",
+        error.ExtractFailed => "one or more partitions failed to extract",
+        error.TimeUnavailable => "failed to read local time for default output directory",
+        error.IntegerOverflow => "numeric overflow while parsing payload metadata",
+        error.IoFailure => "i/o failure while reading or writing payload data",
+        error.OutOfMemory => "out of memory",
+        error.Usage => "invalid arguments",
+        error.HelpDisplayed => "help displayed",
+    };
 }
 
 fn parseArgs(
