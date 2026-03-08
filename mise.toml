@@ -1,0 +1,3 @@
+[tools]
+# Future stable target: zig = "0.16"
+zig = "master"

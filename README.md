@@ -1,6 +1,10 @@
 # zpayload-dumper
 
-Zig implementation of Android `payload.bin` dumper (serial mode).
+Zig implementation of Android `payload.bin` dumper.
+
+## IMPORTANT
+
+- This project currently targets Zig `0.16-dev` (`master`) only.
 
 ## Goals
 
@@ -27,7 +31,7 @@ Zig implementation of Android `payload.bin` dumper (serial mode).
 
 Prerequisites:
 
-- Zig `0.15.2`
+- Zig `master` (tracking 0.16 APIs)
 - `protoc` with `--upb_out` and `--upb_minitable_out`
 - System libs: `upb`, `utf8_range`, `lzma`, `bz2`, `zstd`
 
@@ -54,7 +58,12 @@ Options:
 - `-l`, `--list`: list partitions only
 - `-p`, `--partitions <csv>`: extract selected partitions
 - `-o`, `--output <dir>`: output directory
-- `-c`, `--concurrency <n>`: compatibility flag; validated but extraction is serial for now
+- `-c`, `--concurrency <n>`: number of parallel partition workers
+
+Progress:
+
+- TTY: dynamic multi-partition progress view
+- non-TTY: concise line-based logs
 
 Examples:
 
