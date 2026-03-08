@@ -30,6 +30,24 @@ fn assertFileHashEqual(allocator: std.mem.Allocator, io: std.Io, expected_path: 
     try std.testing.expectEqualSlices(u8, &expected_hash, &actual_hash);
 }
 
+fn fileExists(io: std.Io, path: []const u8) bool {
+    std.Io.Dir.cwd().access(io, path, .{}) catch return false;
+    return true;
+}
+
+fn countFilesInDir(allocator: std.mem.Allocator, io: std.Io, dir_path: []const u8) !usize {
+    var dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true });
+    defer dir.close(io);
+    var walker = try std.Io.Dir.walk(dir, allocator);
+    defer walker.deinit();
+
+    var n: usize = 0;
+    while (try walker.next(io)) |entry| {
+        if (entry.kind == .file) n += 1;
+    }
+    return n;
+}
+
 test "integration selected partitions match go baseline" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -61,6 +79,73 @@ test "integration selected partitions match go baseline" {
     try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/boot.img", boot_out);
     try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vbmeta.img", vbmeta_out);
     try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vendor_boot.img", vendor_boot_out);
+}
+
+test "extract selected writes only requested partition" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/only_vendor_boot", .{tmp.sub_path});
+    defer allocator.free(out_dir);
+    try std.Io.Dir.cwd().createDirPath(io, out_dir);
+
+    var out_buf: [64]u8 = undefined;
+    var err_buf: [64]u8 = undefined;
+    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
+    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
+    var ui = ui_mod.Ui.init(&out_discard.writer, &err_discard.writer, .never, false);
+
+    var p = try payload.Payload.open(allocator, io, "testdata/payload.bin");
+    defer p.deinit();
+    try p.init();
+    try p.extractSelected(out_dir, &.{"vendor_boot"}, 2, &ui);
+
+    const vendor_boot_out = try std.fmt.allocPrint(allocator, "{s}/vendor_boot.img", .{out_dir});
+    defer allocator.free(vendor_boot_out);
+    const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
+    defer allocator.free(boot_out);
+
+    try std.testing.expect(fileExists(io, vendor_boot_out));
+    try std.testing.expect(!fileExists(io, boot_out));
+    try assertFileHashEqual(allocator, io, "testdata/payload-dumper-go-extracted/vendor_boot.img", vendor_boot_out);
+}
+
+test "fixture payload partition count is stable" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var p = try payload.Payload.open(allocator, io, "testdata/payload.bin");
+    defer p.deinit();
+    try p.init();
+    try std.testing.expectEqual(@as(usize, 24), try p.partitionCount());
+}
+
+test "extract selected unknown partition produces no files" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/unknown_partition", .{tmp.sub_path});
+    defer allocator.free(out_dir);
+    try std.Io.Dir.cwd().createDirPath(io, out_dir);
+
+    var out_buf: [64]u8 = undefined;
+    var err_buf: [64]u8 = undefined;
+    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
+    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
+    var ui = ui_mod.Ui.init(&out_discard.writer, &err_discard.writer, .never, false);
+
+    var p = try payload.Payload.open(allocator, io, "testdata/payload.bin");
+    defer p.deinit();
+    try p.init();
+    try p.extractSelected(out_dir, &.{"not_exist_partition"}, 2, &ui);
+
+    try std.testing.expectEqual(@as(usize, 0), try countFilesInDir(allocator, io, out_dir));
 }
 
 test "invalid magic payload returns InvalidMagic" {
