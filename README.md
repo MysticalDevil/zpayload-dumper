@@ -90,6 +90,12 @@ Stress tests:
 zig build test-stress
 ```
 
+End-to-end regression check (extract + hash-compare with Go baseline):
+
+```bash
+zig build check-e2e
+```
+
 ## Usage
 
 ```bash
