@@ -3,3 +3,5 @@ zig-out/
 payload-dumper-*/
 tests/data/
 testdata/
+payload.bin
+extracted_*
