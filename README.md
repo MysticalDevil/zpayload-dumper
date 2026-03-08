@@ -8,8 +8,8 @@ Zig implementation of Android `payload.bin` dumper.
 
 ## Goals
 
-- Protocol-compatible with `payload-dumper-go` for supported operations.
-- Keep implementation independent from `payload-dumper-go` source tree.
+- Protocol-compatible with the Android OTA payload format for supported operations.
+- Keep implementation independent from external reference source trees.
 - Prefer mature libraries for critical protocol/codec pieces.
 
 ## Current support
@@ -140,7 +140,6 @@ Examples:
 ## Notes
 
 - `proto/update_metadata.proto` is the local protocol source used by this project.
-- `payload-dumper-go` is reference-only and ignored from git tracking.
 
 ## Synthetic Sample Generator
 
@@ -156,3 +155,15 @@ Then verify with the dumper:
 ```bash
 ./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_out testdata/generated/smoke1/payload.bin
 ```
+
+## References
+
+- Android Update Engine metadata proto:
+  - https://android.googlesource.com/platform/system/update_engine/+/master/update_metadata.proto
+- payload-dumper-go:
+  - https://github.com/ssut/payload-dumper-go
+
+## Thanks
+
+- Thanks to the `payload-dumper-go` project for protocol behavior reference:
+  https://github.com/ssut/payload-dumper-go
