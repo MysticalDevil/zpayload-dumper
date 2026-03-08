@@ -165,8 +165,8 @@ pub const Payload = struct {
 
             const blob_len_u64 = ctx.operationDataLength(pidx, oidx);
             const blob_off_u64 = ctx.operationDataOffset(pidx, oidx);
-            const blob_abs = self.data_offset + blob_off_u64;
-            const expected_uncompressed = extent_writer.sumExtentBytes(ctx, pidx, oidx, extent_count);
+            const blob_abs = std.math.add(u64, self.data_offset, blob_off_u64) catch return error.IntegerOverflow;
+            const expected_uncompressed = try extent_writer.sumExtentBytes(ctx, pidx, oidx, extent_count);
             const op_type = ctx.operationType(pidx, oidx) orelse return error.UnhandledOperationType;
             var cursor = extent_writer.ExtentCursor.init(ctx, pidx, oidx, extent_count, expected_uncompressed, &fw);
             var hasher = std.crypto.hash.sha2.Sha256.init(.{});

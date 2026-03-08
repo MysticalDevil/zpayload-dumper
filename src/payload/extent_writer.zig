@@ -5,13 +5,18 @@ const upb = @import("../ffi/upb.zig");
 pub const block_size: u64 = 4096;
 pub const Error = errors.PayloadError || errors.SystemError;
 
-pub fn sumExtentBytes(ctx: upb.Context, pidx: usize, oidx: usize, extent_count: usize) usize {
+pub fn bytesForBlocks(num_blocks: u64) Error!u64 {
+    return std.math.mul(u64, num_blocks, block_size) catch return error.IntegerOverflow;
+}
+
+pub fn sumExtentBytes(ctx: upb.Context, pidx: usize, oidx: usize, extent_count: usize) Error!usize {
     var total: u64 = 0;
     var eidx: usize = 0;
     while (eidx < extent_count) : (eidx += 1) {
-        total += ctx.dstExtentNumBlocks(pidx, oidx, eidx) * block_size;
+        const extent_bytes = try bytesForBlocks(ctx.dstExtentNumBlocks(pidx, oidx, eidx));
+        total = std.math.add(u64, total, extent_bytes) catch return error.IntegerOverflow;
     }
-    return @intCast(total);
+    return std.math.cast(usize, total) orelse return error.IntegerOverflow;
 }
 
 pub const ExtentCursor = struct {
@@ -43,8 +48,8 @@ pub const ExtentCursor = struct {
         };
     }
 
-    fn currentExtentLen(self: ExtentCursor) u64 {
-        return self.ctx.dstExtentNumBlocks(self.pidx, self.oidx, self.extent_idx) * block_size;
+    fn currentExtentLen(self: ExtentCursor) Error!u64 {
+        return bytesForBlocks(self.ctx.dstExtentNumBlocks(self.pidx, self.oidx, self.extent_idx));
     }
 
     pub fn writeAll(self: *ExtentCursor, data: []const u8) Error!void {
@@ -52,8 +57,8 @@ pub const ExtentCursor = struct {
         while (pos < data.len) {
             if (self.extent_idx >= self.extent_count) return error.UnexpectedBytesWritten;
 
-            const extent_off = self.ctx.dstExtentStartBlock(self.pidx, self.oidx, self.extent_idx) * block_size;
-            const extent_len = self.currentExtentLen();
+            const extent_off = try bytesForBlocks(self.ctx.dstExtentStartBlock(self.pidx, self.oidx, self.extent_idx));
+            const extent_len = try self.currentExtentLen();
             if (self.extent_written >= extent_len) {
                 self.extent_idx += 1;
                 self.extent_written = 0;
@@ -62,7 +67,8 @@ pub const ExtentCursor = struct {
 
             const remain: usize = @intCast(extent_len - self.extent_written);
             const n = @min(remain, data.len - pos);
-            self.fw.seekTo(extent_off + self.extent_written) catch return error.IoFailure;
+            const write_off = std.math.add(u64, extent_off, self.extent_written) catch return error.IntegerOverflow;
+            self.fw.seekTo(write_off) catch return error.IoFailure;
             self.fw.interface.writeAll(data[pos .. pos + n]) catch return error.IoFailure;
             pos += n;
             self.extent_written += n;
@@ -100,4 +106,10 @@ pub fn writeZeroToExtents(
         try cursor.writeAll(chunk[0..n]);
         remaining -= n;
     }
+}
+
+test "bytesForBlocks detects overflow" {
+    const max_ok = std.math.maxInt(u64) / block_size;
+    try std.testing.expectEqual(max_ok * block_size, try bytesForBlocks(max_ok));
+    try std.testing.expectError(error.IntegerOverflow, bytesForBlocks(max_ok + 1));
 }
