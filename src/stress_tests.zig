@@ -52,8 +52,7 @@ test "stress full extraction baseline sample" {
     try p.init();
     try p.extractAll(out_dir, 4, &ui);
     const elapsed_ns = std.Io.Timestamp.now(io, .real).toNanoseconds() - start;
-
-    std.debug.print("stress extractAll elapsed_ms={d}\n", .{@divTrunc(elapsed_ns, std.time.ns_per_ms)});
+    try std.testing.expect(elapsed_ns > 0);
 
     const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
     defer allocator.free(boot_out);
