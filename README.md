@@ -2,9 +2,8 @@
 
 Zig implementation of Android `payload.bin` dumper.
 
-## IMPORTANT
-
-- This project currently targets Zig `0.16-dev` (`master`) only.
+> [!IMPORTANT]
+> This project currently targets Zig `0.16-dev` (`master`) only.
 
 ## Goals
 
