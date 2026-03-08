@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
     });
     const run_tests = b.addRunArtifact(unit_tests);
     const integration_module = b.createModule(.{
-        .root_source_file = b.path("tests/itest.zig"),
+        .root_source_file = b.path("tests/integration.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -81,7 +81,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_integration.step);
 
     const stress_module = b.createModule(.{
-        .root_source_file = b.path("tests/stress_tests.zig"),
+        .root_source_file = b.path("tests/stress_test.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -91,38 +91,38 @@ pub fn build(b: *std.Build) void {
         .root_module = stress_module,
     });
     const run_stress = b.addRunArtifact(stress_tests);
-    const stress_step = b.step("test-stress", "Run stress/integration tests");
+    const stress_step = b.step("test_stress", "Run stress/integration tests");
     stress_step.dependOn(&run_stress.step);
 
     const e2e_module = b.createModule(.{
-        .root_source_file = b.path("tests/e2e_check.zig"),
+        .root_source_file = b.path("tests/e2e_test.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
     attachIntegrationImport(e2e_module, zpayload_mod);
     const e2e_exe = b.addExecutable(.{
-        .name = "zpayload-e2e-check",
+        .name = "zpayload_e2e_test",
         .root_module = e2e_module,
     });
     const run_e2e = b.addRunArtifact(e2e_exe);
     if (b.args) |args| run_e2e.addArgs(args);
-    const e2e_step = b.step("check-e2e", "Extract full payload and compare hashes with generated baseline");
+    const e2e_step = b.step("check_e2e", "Extract full payload and compare hashes with generated baseline");
     e2e_step.dependOn(&run_e2e.step);
 
     const bench_module = b.createModule(.{
-        .root_source_file = b.path("tests/bench_smoke.zig"),
+        .root_source_file = b.path("tests/smoke_benchmark.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
     attachIntegrationImport(bench_module, zpayload_mod);
     const bench_exe = b.addExecutable(.{
-        .name = "zpayload-bench-smoke",
+        .name = "zpayload_smoke_benchmark",
         .root_module = bench_module,
     });
     const run_bench = b.addRunArtifact(bench_exe);
     if (b.args) |args| run_bench.addArgs(args);
-    const bench_step = b.step("bench-smoke", "Run lightweight extraction benchmark");
+    const bench_step = b.step("bench_smoke", "Run lightweight extraction benchmark");
     bench_step.dependOn(&run_bench.step);
 }

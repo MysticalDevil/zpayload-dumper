@@ -1,6 +1,6 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const ui_mod = @import("../cli_ui.zig");
+const ui_mod = @import("../command_line_ui.zig");
 
 pub const Error = errors.AppError;
 

@@ -76,5 +76,5 @@ pub fn main(init: std.process.Init) !void {
         );
     }
 
-    try out.interface.writeAll("[OK] bench-smoke complete\n");
+    try out.interface.writeAll("[OK] bench_smoke complete\n");
 }

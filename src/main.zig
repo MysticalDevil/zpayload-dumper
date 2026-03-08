@@ -1,9 +1,9 @@
 const std = @import("std");
 const errors = @import("errors.zig");
 const payload = @import("payload.zig");
-const ui_mod = @import("cli_ui.zig");
-const zip_payload = @import("input/zip_payload.zig");
-const cli_args = @import("app/cli_args.zig");
+const ui_mod = @import("command_line_ui.zig");
+const zip_payload = @import("input/payload_zip.zig");
+const cli_args = @import("app/command_line_args.zig");
 const messages = @import("app/messages.zig");
 const output_dir = @import("app/output_dir.zig");
 

@@ -96,25 +96,25 @@ zig build test
 Stress tests:
 
 ```bash
-zig build test-stress
+zig build test_stress
 ```
 
 End-to-end regression check (extract + hash-compare with generated baseline):
 
 ```bash
-zig build check-e2e
+zig build check_e2e
 ```
 
 Lightweight benchmark smoke (fixed partition subset):
 
 ```bash
-zig build bench-smoke
+zig build bench_smoke
 ```
 
 Custom payload:
 
 ```bash
-zig build bench-smoke -- /path/to/payload.bin
+zig build bench_smoke -- /path/to/payload.bin
 ```
 
 ## Current Support

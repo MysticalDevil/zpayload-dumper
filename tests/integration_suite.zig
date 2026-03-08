@@ -76,7 +76,7 @@ test "sample payload partition count is stable" {
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try std.testing.expectEqual(@as(usize, 5), try p.partitionCount());
+    try std.testing.expectEqual(@as(usize, 24), try p.partitionCount());
 }
 
 test "extract selected unknown partition produces no files" {

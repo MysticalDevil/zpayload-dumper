@@ -6,18 +6,18 @@ build:
 test:
     zig build test
 
-test-stress:
-    zig build test-stress
+test_stress:
+    zig build test_stress
 
-check-e2e:
-    zig build check-e2e
+check_e2e:
+    zig build check_e2e
 
-sim-test name="just-sim":
+sim_test name="just-sim":
     python3 scripts/generate_sample_payload.py --name {{name}}
-    zig build check-e2e -- tests/data/generated/{{name}}/payload.bin tests/data/generated/{{name}}/extracted
+    zig build check_e2e -- tests/data/generated/{{name}}/payload.bin tests/data/generated/{{name}}/extracted
 
-bench-smoke:
-    zig build bench-smoke
+bench_smoke:
+    zig build bench_smoke
 
 clean:
     rm -rf .zig-cache zig-out tests/data/generated

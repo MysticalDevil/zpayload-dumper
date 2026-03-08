@@ -5,5 +5,5 @@ pub const std_options: std.Options = .{
 };
 
 comptime {
-    _ = @import("integration_tests.zig");
+    _ = @import("integration_suite.zig");
 }
