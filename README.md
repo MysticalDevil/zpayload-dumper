@@ -99,6 +99,11 @@ Stress tests:
 zig build test_stress
 ```
 
+`test_stress` now includes:
+- full extraction baseline check
+- selected partition concurrency matrix (`1/2/4/8`, repeated rounds)
+- repeated full extraction stability rounds
+
 End-to-end regression check (extract + hash-compare with generated baseline):
 
 ```bash
@@ -115,6 +120,13 @@ Custom payload:
 
 ```bash
 zig build bench_smoke -- /path/to/payload.bin
+```
+
+Pressure benchmark matrix (startup/system partition sets with `1/2/4/8` concurrency):
+
+```bash
+zig build bench_pressure
+zig build bench_pressure -- /path/to/payload.bin
 ```
 
 ## Current Support

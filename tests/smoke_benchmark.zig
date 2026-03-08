@@ -17,6 +17,13 @@ fn mibPerSec(bytes: u64, elapsed_ns: i128) u64 {
     return @intCast(bytes_per_sec / (1024 * 1024));
 }
 
+fn kibPerSec(bytes: u64, elapsed_ns: i128) u64 {
+    if (elapsed_ns <= 0) return 0;
+    const elapsed_ms = @max(@as(i128, 1), @divTrunc(elapsed_ns, std.time.ns_per_ms));
+    const bytes_per_sec = (@as(u128, bytes) * 1000) / @as(u128, @intCast(elapsed_ms));
+    return @intCast(bytes_per_sec / 1024);
+}
+
 fn extractedBytes(io: std.Io, out_dir: []const u8, names: []const []const u8) !u64 {
     var total: u64 = 0;
     for (names) |name| {
@@ -71,8 +78,8 @@ pub fn main(init: std.process.Init) !void {
         const elapsed_ms: i128 = @divTrunc(elapsed_ns, std.time.ns_per_ms);
         const bytes = try extractedBytes(io, out_dir, partitions);
         try out.interface.print(
-            "[BENCH] c={d} elapsed_ms={d} size_mib={d} throughput_mib_s={d}\n",
-            .{ c, elapsed_ms, bytes / (1024 * 1024), mibPerSec(bytes, elapsed_ns) },
+            "[BENCH] c={d} elapsed_ms={d} size_kib={d} throughput_kib_s={d} throughput_mib_s={d}\n",
+            .{ c, elapsed_ms, bytes / 1024, kibPerSec(bytes, elapsed_ns), mibPerSec(bytes, elapsed_ns) },
         );
     }
 

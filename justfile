@@ -19,5 +19,8 @@ sim_test name="just-sim":
 bench_smoke:
     zig build bench_smoke
 
+bench_pressure:
+    zig build bench_pressure
+
 clean:
     rm -rf .zig-cache zig-out tests/data/generated

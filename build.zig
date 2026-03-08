@@ -125,4 +125,20 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_bench.addArgs(args);
     const bench_step = b.step("bench_smoke", "Run lightweight extraction benchmark");
     bench_step.dependOn(&run_bench.step);
+
+    const pressure_bench_module = b.createModule(.{
+        .root_source_file = b.path("tests/pressure_benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    attachIntegrationImport(pressure_bench_module, zpayload_mod);
+    const pressure_bench_exe = b.addExecutable(.{
+        .name = "zpayload_pressure_benchmark",
+        .root_module = pressure_bench_module,
+    });
+    const run_pressure_bench = b.addRunArtifact(pressure_bench_exe);
+    if (b.args) |args| run_pressure_bench.addArgs(args);
+    const pressure_bench_step = b.step("bench_pressure", "Run pressure benchmark matrix");
+    pressure_bench_step.dependOn(&run_pressure_bench.step);
 }
