@@ -108,12 +108,6 @@ Custom payload:
 zig build bench-smoke -- /path/to/payload.bin
 ```
 
-Real synthetic simulation test via Zig build:
-
-```bash
-zig build sim-test
-```
-
 ## Usage
 
 ```bash
