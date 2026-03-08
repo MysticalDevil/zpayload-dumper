@@ -4,12 +4,13 @@ Generate a tiny synthetic Android payload.bin and matching extracted images.
 
 Usage:
   python3 scripts/generate_sample_payload.py
-  python3 scripts/generate_sample_payload.py --out-root testdata/generated --name demo
+  python3 scripts/generate_sample_payload.py --out-root tests/data/generated --name demo
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import bz2
 import hashlib
 import lzma
@@ -19,6 +20,7 @@ import shutil
 import struct
 import subprocess
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
@@ -196,9 +198,45 @@ def write_payload(payload_path: Path, manifest_bin: bytes, signatures_bin: bytes
         f.write(blobs)
 
 
+def payload_metadata_blob(manifest_bin: bytes, signatures_bin: bytes) -> bytes:
+    header = b"".join(
+        (
+            b"CrAU",
+            struct.pack(">Q", 2),
+            struct.pack(">Q", len(manifest_bin)),
+            struct.pack(">I", len(signatures_bin)),
+        )
+    )
+    return header + manifest_bin + signatures_bin
+
+
+def build_payload_properties(payload_bytes: bytes, metadata_bytes: bytes) -> bytes:
+    lines = [
+        "FILE_HASH=" + base64.b64encode(hashlib.sha256(payload_bytes).digest()).decode("ascii"),
+        f"FILE_SIZE={len(payload_bytes)}",
+        "METADATA_HASH=" + base64.b64encode(hashlib.sha256(metadata_bytes).digest()).decode("ascii"),
+        f"METADATA_SIZE={len(metadata_bytes)}",
+    ]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def write_ota_zip(ota_zip_path: Path, payload_path: Path, payload_properties: bytes) -> None:
+    metadata = (
+        "ota-type=AB\n"
+        "post-timestamp=0\n"
+        "post-build=eng.sample\n"
+        "pre-device=sample_device\n"
+    ).encode("utf-8")
+
+    with zipfile.ZipFile(ota_zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr("payload.bin", payload_path.read_bytes())
+        zf.writestr("payload_properties.txt", payload_properties)
+        zf.writestr("META-INF/com/android/metadata", metadata)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out-root", default="testdata/generated", help="output root directory")
+    ap.add_argument("--out-root", default="tests/data/generated", help="output root directory")
     ap.add_argument("--name", default="sample", help="sample name")
     ap.add_argument("--seed", type=int, default=None, help="random seed for reproducibility")
     args = ap.parse_args()
@@ -208,6 +246,7 @@ def main() -> None:
     out_root = (repo_root / args.out_root).resolve()
     sample_root = out_root / args.name
     payload_path = sample_root / "payload.bin"
+    ota_zip_path = sample_root / "ota_update.zip"
     extracted_dir = sample_root / "extracted"
     manifest_txt_path = sample_root / "manifest.textproto"
 
@@ -226,11 +265,16 @@ def main() -> None:
     manifest_bin = protoc_encode_manifest(proto_path, manifest_text)
     signatures_bin = b""
     write_payload(payload_path, manifest_bin, signatures_bin, data_blobs)
+    payload_bytes = payload_path.read_bytes()
+    metadata_bytes = payload_metadata_blob(manifest_bin, signatures_bin)
+    payload_properties = build_payload_properties(payload_bytes, metadata_bytes)
+    write_ota_zip(ota_zip_path, payload_path, payload_properties)
 
     for spec in specs:
         (extracted_dir / f"{spec.name}.img").write_bytes(spec.img)
 
     print(f"[OK] generated payload: {payload_path}")
+    print(f"[OK] generated ota zip: {ota_zip_path}")
     print(f"[OK] generated golden dir: {extracted_dir}")
     print(f"[INFO] seed: {seed}")
     print(f"[INFO] manifest text: {manifest_txt_path}")

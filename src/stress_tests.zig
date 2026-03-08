@@ -47,7 +47,7 @@ test "stress full extraction baseline sample" {
     var ui = ui_mod.Ui.init(&out_discard.writer, &err_discard.writer, .never, false);
 
     const start = std.Io.Timestamp.now(io, .real).toNanoseconds();
-    var p = try payload.Payload.open(allocator, io, "testdata/payload.bin");
+    var p = try payload.Payload.open(allocator, io, "tests/data/generated/smoke1/payload.bin");
     defer p.deinit();
     try p.init();
     try p.extractAll(out_dir, 4, &ui);
@@ -61,7 +61,7 @@ test "stress full extraction baseline sample" {
     const vendor_out = try std.fmt.allocPrint(allocator, "{s}/vendor.img", .{out_dir});
     defer allocator.free(vendor_out);
 
-    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/boot.img", boot_out);
-    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/system.img", system_out);
-    try assertFileHashEqual(allocator, io, "testdata/reference-extracted/vendor.img", vendor_out);
+    try assertFileHashEqual(allocator, io, "tests/data/generated/smoke1/extracted/boot.img", boot_out);
+    try assertFileHashEqual(allocator, io, "tests/data/generated/smoke1/extracted/system.img", system_out);
+    try assertFileHashEqual(allocator, io, "tests/data/generated/smoke1/extracted/vendor.img", vendor_out);
 }

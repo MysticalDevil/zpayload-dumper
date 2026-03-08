@@ -14,10 +14,10 @@ check-e2e:
 
 sim-test name="just-sim":
     python3 scripts/generate_sample_payload.py --name {{name}}
-    zig build check-e2e -- testdata/generated/{{name}}/payload.bin testdata/generated/{{name}}/extracted
+    zig build check-e2e -- tests/data/generated/{{name}}/payload.bin tests/data/generated/{{name}}/extracted
 
 bench-smoke:
     zig build bench-smoke
 
 clean:
-    rm -rf .zig-cache zig-out testdata/generated
+    rm -rf .zig-cache zig-out tests/data/generated

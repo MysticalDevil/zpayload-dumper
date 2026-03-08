@@ -96,7 +96,7 @@ pub fn build(b: *std.Build) void {
     });
     const run_e2e = b.addRunArtifact(e2e_exe);
     if (b.args) |args| run_e2e.addArgs(args);
-    const e2e_step = b.step("check-e2e", "Extract full payload and compare hashes with go baseline");
+    const e2e_step = b.step("check-e2e", "Extract full payload and compare hashes with generated baseline");
     e2e_step.dependOn(&run_e2e.step);
 
     const bench_module = b.createModule(.{

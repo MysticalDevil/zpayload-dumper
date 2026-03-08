@@ -90,7 +90,7 @@ Stress tests:
 zig build test-stress
 ```
 
-End-to-end regression check (extract + hash-compare with Go baseline):
+End-to-end regression check (extract + hash-compare with generated baseline):
 
 ```bash
 zig build check-e2e
@@ -143,8 +143,9 @@ Examples:
 
 ## Synthetic Sample Generator
 
-Generate a tiny synthetic `payload.bin` and matching golden extracted images
-for local/CI testing (output is under `testdata/`, which is git-ignored):
+Generate a tiny synthetic `payload.bin`, a simulated OTA zip (`ota_update.zip`),
+and matching golden extracted images
+for local/CI testing (output is under `tests/data/`, which is git-ignored):
 
 ```bash
 python3 scripts/generate_sample_payload.py --name smoke1
@@ -153,7 +154,8 @@ python3 scripts/generate_sample_payload.py --name smoke1
 Then verify with the dumper:
 
 ```bash
-./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_out testdata/generated/smoke1/payload.bin
+./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_out /path/to/payload.bin
+./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_zip_out /path/to/ota_update.zip
 ```
 
 ## References

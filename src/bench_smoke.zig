@@ -32,7 +32,7 @@ pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
 
-    const payload_path = if (args.len >= 2) args[1] else "testdata/payload.bin";
+    const payload_path = if (args.len >= 2) args[1] else "tests/data/generated/smoke1/payload.bin";
     const partitions: []const []const u8 = &.{ "boot", "vbmeta", "vendor_boot" };
     const concurrencies = [_]usize{ 1, 4 };
 
