@@ -96,6 +96,24 @@ End-to-end regression check (extract + hash-compare with Go baseline):
 zig build check-e2e
 ```
 
+Lightweight benchmark smoke (fixed partition subset):
+
+```bash
+zig build bench-smoke
+```
+
+Custom payload:
+
+```bash
+zig build bench-smoke -- /path/to/payload.bin
+```
+
+Real synthetic simulation test via Zig build:
+
+```bash
+zig build sim-test
+```
+
 ## Usage
 
 ```bash
@@ -129,3 +147,18 @@ Examples:
 
 - `proto/update_metadata.proto` is the local protocol source used by this project.
 - `payload-dumper-go` is reference-only and ignored from git tracking.
+
+## Synthetic Sample Generator
+
+Generate a tiny synthetic `payload.bin` and matching golden extracted images
+for local/CI testing (output is under `testdata/`, which is git-ignored):
+
+```bash
+python3 scripts/generate_sample_payload.py --name smoke1
+```
+
+Then verify with the dumper:
+
+```bash
+./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_out testdata/generated/smoke1/payload.bin
+```

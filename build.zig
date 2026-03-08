@@ -95,6 +95,38 @@ pub fn build(b: *std.Build) void {
         .root_module = e2e_module,
     });
     const run_e2e = b.addRunArtifact(e2e_exe);
+    if (b.args) |args| run_e2e.addArgs(args);
     const e2e_step = b.step("check-e2e", "Extract full payload and compare hashes with go baseline");
     e2e_step.dependOn(&run_e2e.step);
+
+    const gen_sample = b.addSystemCommand(&.{
+        "python3",
+        "scripts/generate_sample_payload.py",
+        "--name",
+        "zig-sim",
+    });
+    const run_e2e_sim = b.addRunArtifact(e2e_exe);
+    run_e2e_sim.addArgs(&.{
+        "testdata/generated/zig-sim/payload.bin",
+        "testdata/generated/zig-sim/extracted",
+    });
+    run_e2e_sim.step.dependOn(&gen_sample.step);
+    const sim_step = b.step("sim-test", "Generate synthetic payload and verify extraction end-to-end");
+    sim_step.dependOn(&run_e2e_sim.step);
+
+    const bench_module = b.createModule(.{
+        .root_source_file = b.path("src/bench_smoke.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    attachPayloadDeps(b, bench_module, upb_out, minitable_out);
+    const bench_exe = b.addExecutable(.{
+        .name = "zpayload-bench-smoke",
+        .root_module = bench_module,
+    });
+    const run_bench = b.addRunArtifact(bench_exe);
+    if (b.args) |args| run_bench.addArgs(args);
+    const bench_step = b.step("bench-smoke", "Run lightweight extraction benchmark");
+    bench_step.dependOn(&run_bench.step);
 }
