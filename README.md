@@ -113,6 +113,7 @@ Options:
 - `-p`, `--partitions <csv>`: extract selected partitions
 - `-o`, `--output <dir>`: output directory
 - `-c`, `--concurrency <n>`: number of parallel partition workers, default `4`
+- `--dry-run`: simulate extraction progress without writing output (useful for testing progress UI or validating payload parseability)
 - `--color`: alias for `--color=always`
 - `--color=<mode>`: color mode, one of `auto`, `always`, `never`
 - `--no-color`: alias for `--color=never`
@@ -146,6 +147,8 @@ Examples:
 ./zig-out/bin/zpayload-dumper -l payload.bin
 ./zig-out/bin/zpayload-dumper -p boot,vendor -o out payload.bin
 ./zig-out/bin/zpayload-dumper payload.zip
+./zig-out/bin/zpayload-dumper --dry-run -p boot,vendor payload.bin
+./zig-out/bin/zpayload-dumper --dry-run payload.zip
 ```
 
 Progress:
@@ -214,14 +217,50 @@ zig build bench_pressure -- /path/to/payload.bin
   - raw `payload.bin`
   - `.zip` containing `payload.bin`
 
+## Benchmark vs payload-dumper-go
+
+All numbers below are wall-clock time (mean of 5 runs, hyperfine).
+
+**Test machine:** AMD Ryzen 7 4800H (8c/16t), 22 GB DDR4, ZHITAI TiPlus7100 1TB NVMe,
+Gentoo Linux (kernel 7.0.0-gentoo-dist).
+
+The test payload is a **78 MB** synthetic sample
+(`scripts/generate_sample_payload.py --total-mb 128`) that exercises
+`REPLACE`, `REPLACE_XZ`, `REPLACE_BZ`, `ZSTD` and `ZERO` operations.
+
+| Scenario | Concurrency | zpayload-dumper | payload-dumper-go | Speed-up |
+|----------|-------------|-----------------|-------------------|----------|
+| `payload.bin` | 1 worker | **264 ms** | 1 386 ms | **5.3×** |
+| `payload.bin` | 4 workers | **275 ms** | 442 ms | **1.6×** |
+| `payload.bin` | 8 workers | **267 ms** | 304 ms | **1.1×** |
+| `ota_update.zip` | 4 workers | **382 ms** | 514 ms | **1.3×** |
+
+Memory (bench128, c=4): zpayload-dumper ~115 MB peak RSS vs payload-dumper-go ~56 MB.
+
+Observations:
+
+- **Single-threaded**: Zig is dramatically faster (5×), mainly due to zero-allocation
+  decompression paths and direct `std.Io` streaming writes.
+- **Multi-threaded**: As concurrency rises, SSD I/O becomes the dominant bottleneck
+  and the gap narrows. At 8 workers both tools are within ~15 %.
+- **Zip input**: Adds ~100 ms for both tools (unzip overhead). zpayload-dumper
+  retains a consistent lead.
+
+> See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the full benchmark matrix
+> (bench32/128/256/512, concurrency scaling analysis, and bottleneck breakdown).
+
 ## Synthetic Sample Generator
 
-Generate a tiny synthetic `payload.bin`, a simulated OTA zip (`ota_update.zip`),
+Generate a synthetic `payload.bin`, a simulated OTA zip (`ota_update.zip`),
 and matching golden extracted images
 for local/CI testing (output is under `tests/data/`, which is git-ignored):
 
 ```bash
+# tiny sample (~56 KB payload, default)
 python3 scripts/generate_sample_payload.py --name smoke1
+
+# larger sample for benchmarking (~80 MB payload with 128 MB raw data)
+python3 scripts/generate_sample_payload.py --name bench128 --total-mb 128
 ```
 
 Then verify with the dumper:
