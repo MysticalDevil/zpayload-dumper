@@ -38,13 +38,13 @@ dominated by a few large partitions.
 #### Architecture
 
 ```text
-┌─────────────────────────────────────────┐
+┌───────────────────────────────────────────┐
 │  Main Thread                              │
 │  ├─ Parse manifest                        │
 │  ├─ For each selected partition:          │
 │  │   spawn thread → extractPartition()    │
 │  └─ Wait for all threads                  │
-└─────────────────────────────────────────┘
+└───────────────────────────────────────────┘
 
 extractPartition(thread):
   open output.img

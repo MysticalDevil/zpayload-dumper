@@ -98,7 +98,22 @@ when the 256MB memory budget is exhausted.
 
 ## 4. Performance
 
-Measured on the same machine (Ryzen 7 4800H, NVMe SSD) with the same real OTA payload (~3GB compressed, ~6.9GB output).
+### Test Environment
+
+| Component | Spec |
+|-----------|------|
+| **CPU** | AMD Ryzen 7 4800H (8 cores / 16 threads, 2.9 GHz base) |
+| **Memory** | 22 GB DDR4 |
+| **GPU** | NVIDIA GeForce RTX 2060 Mobile + AMD Radeon Vega (integrated) |
+| **Storage** | ZHITAI TiPlus7100 1TB NVMe SSD |
+| **OS** | Gentoo Linux (kernel 7.0.0-gentoo-dist) |
+| **Zig** | 0.16.0 (`ReleaseFast`) |
+| **Go** | 1.26.2 |
+| **Benchmark tool** | hyperfine (mean of 3–5 runs, with warmup) |
+
+### 4.1 Real OTA Payload (~3 GB compressed, ~6.9 GB output)
+
+Measured with a real Android OTA payload.
 
 | Scenario | payload-dumper-go (est.) | zpayload-dumper | Speedup |
 |----------|-------------------------|-----------------|---------|
@@ -112,9 +127,94 @@ profile.
 
 **Why the gap?**
 
-The Go version is architecturally identical to our baseline: **partition-level parallelism with no intra-partipartition
+The Go version is architecturally identical to our baseline: **partition-level parallelism with no intra-partition
 parallelization**. The Zig rewrite's operation-level parallelism + streaming direct-write is the sole reason for the 3–5.5×
 speedup.
+
+### 4.2 Synthetic Payload Benchmarks
+
+All payloads were generated with `scripts/generate_sample_payload.py` (seed=42)
+and exercise `REPLACE`, `REPLACE_XZ`, `REPLACE_BZ`, `ZSTD`, and `ZERO` operations.
+
+| Name | Payload size | Raw partition total |
+|------|-------------|---------------------|
+| bench32 | 19.6 MB | 35.3 MB |
+| bench128 | 78.4 MB | 141 MB |
+| bench256 | 156 MB | 283 MB |
+| bench512 | 313 MB | 565 MB |
+
+#### bench32
+
+| Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
+|-------------|-----------------|-------------------|----------|
+| 1 | **106 ms** | 387 ms | **3.6×** |
+| 2 | **106 ms** | 201 ms | **1.9×** |
+| 4 | **105 ms** | 111 ms | **1.1×** |
+| 8 | 107 ms | **86 ms** | 0.8× |
+
+#### bench128
+
+| Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
+|-------------|-----------------|-------------------|----------|
+| 1 | **264 ms** | 1 386 ms | **5.3×** |
+| 2 | **312 ms** | 704 ms | **2.3×** |
+| 4 | **275 ms** | 442 ms | **1.6×** |
+| 8 | **267 ms** | 304 ms | **1.1×** |
+| 16 | 312 ms | **274 ms** | 0.9× |
+
+#### bench256
+
+| Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
+|-------------|-----------------|-------------------|----------|
+| 1 | **507 ms** | 2 266 ms | **4.5×** |
+| 4 | **510 ms** | 765 ms | **1.5×** |
+| 8 | **489 ms** | 562 ms | **1.1×** |
+
+#### bench512
+
+| Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
+|-------------|-----------------|-------------------|----------|
+| 1 | **1 013 ms** | 4 504 ms | **4.5×** |
+| 4 | **966 ms** | 1 438 ms | **1.5×** |
+| 8 | **960 ms** | 1 091 ms | **1.1×** |
+
+#### Zip Extraction (bench128, c=4)
+
+| Tool | Time | Speedup |
+|------|------|----------|
+| zpayload-dumper | **382 ms** | **1.3×** |
+| payload-dumper-go | 514 ms | — |
+
+#### Memory Usage (bench128, c=4)
+
+| Tool | Peak RSS |
+|------|----------|
+| zpayload-dumper | ~115 MB |
+| payload-dumper-go | ~56 MB |
+
+#### Key Observations from Synthetic Benchmarks
+
+1. **Single-threaded dominance**: Zig is consistently **4–5× faster** at c=1.
+   This comes from zero-allocation decompression, no GC pauses, and direct
+   `std.Io` streaming writes.
+
+2. **Concurrency scaling gap**:
+
+   | Payload | zpayload-dumper c=1→c=8 | payload-dumper-go c=1→c=8 |
+   |---------|------------------------|---------------------------|
+   | bench32 | 1.0× (no gain) | **4.5×** |
+   | bench128 | 1.0× (no gain) | **4.6×** |
+   | bench256 | 1.0× (no gain) | **4.0×** |
+   | bench512 | 1.1× (barely any) | **4.1×** |
+
+   **zpayload-dumper does not scale with concurrency.** From 1 worker to 8
+   workers wall-clock time stays flat, while Go achieves a 4× reduction.
+
+3. **Cross-over point**: Small payloads (bench32) see Go catch up at c=4 and
+   win at c=8. Large payloads (bench512) keep Zig ahead by ~14 % even at c=8.
+
+4. **Memory**: Zig uses roughly **2× more RAM** than Go. The 256 MB memory
+   budget for the pending queue is the primary contributor.
 
 ---
 
@@ -376,7 +476,7 @@ To reproduce the comparison yourself:
 
 ```bash
 # Go version
-cd ~/OSS/payload-dumper-go
+cd /path/to/payload-dumper-go
 go build -o pdgo .
 time ./pdgo -c 1 -o go_out /path/to/payload.bin
 
