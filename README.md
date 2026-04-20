@@ -92,6 +92,10 @@ Environment variables:
 - `CLICOLOR_FORCE=1`
 - `TMPDIR`
 
+Disk space check:
+
+Before extraction begins, the engine checks available disk space via `statvfs`. If the output directory does not have enough free space for the selected partitions, extraction aborts immediately with a clear error message showing required vs available space.
+
 Examples:
 
 ```bash
