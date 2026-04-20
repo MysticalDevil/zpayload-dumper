@@ -2,15 +2,16 @@ const std = @import("std");
 const errors = @import("../errors.zig");
 const payload = @import("../payload/root.zig");
 const zip_payload = @import("../input/payload_zip.zig");
-const cli_types = @import("../cli/types.zig");
-const cli_ui = @import("../cli/ui.zig");
-const output_dir = @import("output_dir.zig");
+const render = @import("render.zig");
+const types = @import("types.zig");
+const cli_ui = @import("ui.zig");
+const output = @import("output.zig");
 
 const Error = errors.AppError;
 const default_tmp_base = "/tmp";
 const zip_suffix = ".zip";
 
-pub fn run(init: std.process.Init, options: *const cli_types.CliOptions, ui: *const cli_ui.Ui) Error!void {
+pub fn run(init: std.process.Init, options: *const types.CliOptions, ui: *const cli_ui.Ui) Error!void {
     const gpa = init.gpa;
     const io = init.io;
 
@@ -61,7 +62,7 @@ pub fn run(init: std.process.Init, options: *const cli_types.CliOptions, ui: *co
     defer if (owned_output) |dir| gpa.free(dir);
 
     const out_path = if (options.output) |value| value else blk: {
-        const generated = try output_dir.makeDefaultOutputDirectory(gpa);
+        const generated = try output.makeDefaultOutputDirectory(gpa);
         owned_output = generated;
         break :blk generated;
     };
@@ -91,10 +92,10 @@ pub fn run(init: std.process.Init, options: *const cli_types.CliOptions, ui: *co
             const select_message = std.fmt.bufPrint(&select_buffer, "extracting selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
             ui.info(select_message) catch return error.IoFailure;
         }
-        try dumper.extractSelected(out_path, selected.items, @intCast(options.concurrency), &reporter);
+        try dumper.extractSelected(out_path, selected.items, @intCast(options.concurrency), &reporter, render.sink);
     } else {
         ui.info("extracting all partitions") catch return error.IoFailure;
-        try dumper.extractAll(out_path, @intCast(options.concurrency), &reporter);
+        try dumper.extractAll(out_path, @intCast(options.concurrency), &reporter, render.sink);
     }
 
     ui.success("extraction complete") catch return error.IoFailure;

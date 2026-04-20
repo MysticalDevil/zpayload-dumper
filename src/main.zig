@@ -1,8 +1,6 @@
 const std = @import("std");
 const errors = @import("errors.zig");
 const cli = @import("cli/root.zig");
-const cli_runner = @import("app/cli_runner.zig");
-const messages = @import("app/messages.zig");
 
 const Error = errors.AppError;
 
@@ -14,7 +12,7 @@ pub fn main(init: std.process.Init) !void {
             var stderr_file = std.Io.File.stderr();
             var stderr = stderr_file.writer(io, &.{});
             const detail = errors.detail(err);
-            stderr.interface.print("error[{s}]: {s}\n", .{ detail.stable_name, messages.userMessage(err) }) catch {};
+            stderr.interface.print("error[{s}]: {s}\n", .{ detail.stable_name, cli.messages.userMessage(err) }) catch {};
             std.process.exit(1);
         },
     };
@@ -59,7 +57,7 @@ fn run(init: std.process.Init) Error!void {
             defer options.deinit();
             const colors = cli.parse.resolveColors(options.color_mode, terminal);
             const ui = cli.ui.Ui.init(&stdout.interface, &stderr.interface, colors, terminal);
-            cli_runner.run(init, &options, &ui) catch |err| switch (err) {
+            cli.runner.run(init, &options, &ui) catch |err| switch (err) {
                 error.Usage => {
                     cli.help.renderUsage(&stderr.interface) catch return error.IoFailure;
                     return error.Usage;
