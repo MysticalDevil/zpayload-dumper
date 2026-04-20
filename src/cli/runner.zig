@@ -28,27 +28,48 @@ pub fn run(
     var cleanup_payload_path: ?[]u8 = null;
     defer if (cleanup_payload_path) |path| gpa.free(path);
     defer if (cleanup_tmp_dir) |path| {
-        std.Io.Dir.cwd().deleteTree(io, path) catch |err| {
+        zip_payload.cleanupExtractedPayloadTempDir(io, path) catch |err| {
             std.log.warn("failed to cleanup temporary directory '{s}': {}", .{ path, err });
         };
         gpa.free(path);
     };
 
-    var effective_payload = options.input;
-    const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
-    if (std.mem.endsWith(u8, effective_payload, zip_suffix)) {
-        ui.warn("zip input detected, extracting payload.bin first") catch return error.IoFailure;
-        const extracted = try zip_payload.extractPayloadBinFromZip(gpa, io, tmp_base, effective_payload);
-        cleanup_tmp_dir = extracted.temp_dir;
-        cleanup_payload_path = extracted.payload_path;
-        effective_payload = extracted.payload_path;
+    const is_zip_input = std.mem.endsWith(u8, options.input, zip_suffix);
+    var effective_payload: []const u8 = options.input;
+    var dumper: payload.Payload = undefined;
+    defer dumper.deinit();
+
+    if (is_zip_input and options.dry_run) {
+        ui.warn("zip input detected, reading payload metadata in memory for dry-run") catch return error.IoFailure;
+        try logPath(ui, "input zip: {s}", options.input);
+        var metadata = try zip_payload.readPayloadMetadataFromZip(gpa, io, options.input);
+        defer metadata.deinit(gpa);
+        dumper = .{
+            .allocator = gpa,
+            .io = io,
+        };
+        try dumper.initFromMetadata(metadata.manifest, metadata.signature);
+    } else {
+        const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
+        if (is_zip_input) {
+            ui.warn("zip input detected, extracting payload.bin first") catch return error.IoFailure;
+            const extracted = try zip_payload.extractPayloadBinFromZip(gpa, io, tmp_base, options.input);
+            if (extracted.used_fallback_tmp) {
+                ui.warn("temporary extraction moved to ./.tmp because the preferred temp directory does not have enough free space") catch return error.IoFailure;
+            }
+            cleanup_tmp_dir = extracted.temp_dir;
+            cleanup_payload_path = extracted.payload_path;
+            effective_payload = extracted.payload_path;
+        }
+
+        try logPath(ui, "input: {s}", effective_payload);
+        dumper = try payload.Payload.open(gpa, io, effective_payload);
+        try dumper.init();
     }
 
-    try logPath(ui, "input: {s}", effective_payload);
-
-    var dumper = try payload.Payload.open(gpa, io, effective_payload);
-    defer dumper.deinit();
-    try dumper.init();
+    if (is_zip_input and options.dry_run) {
+        try logPath(ui, "metadata source: {s}", "payload.bin inside zip (in-memory)");
+    }
 
     const partition_count = try dumper.partitionCount();
     {
