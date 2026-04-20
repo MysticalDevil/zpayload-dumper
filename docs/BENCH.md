@@ -26,8 +26,8 @@ A single partition may contain hundreds or thousands of operations. The baseline
 which means a large partition like `product` (~4 GB) is handled by exactly one thread—even though the CPU has 16 threads
 available.
 
-**The bottleneck**: intra-partition serialization. One thread per partition cannot keep all CPU cores busy when the workload is
-dominated by a few large partitions.
+**The bottleneck**: operations within a partition are processed one at a time. One thread per partition
+cannot keep all CPU cores busy when the workload is dominated by a few large partitions.
 
 ---
 
@@ -64,7 +64,7 @@ extractPartition(thread):
 
 When extracting `system` (4 partitions), only 4 threads are active. When extracting all 24 partitions, the large ones (`product`,
 `system`, `vendor`) occupy threads for most of the duration, while small partitions finish quickly. Concurrency ≥ 2 gives a +50%
-boost, but c ≥ 4 shows **diminishing returns** because the wall-clock time is dominated by the single-threaded processing of the
+boost, but c ≥ 4 shows **smaller improvements** because the total time is dominated by the single-threaded processing of the
 largest partition.
 
 #### Results
@@ -87,7 +87,8 @@ Before attempting a radical redesign, we tried three "safe" optimizations that d
    reducing seek frequency.
 2. **Sort scheduling**: Partitions are sorted by total size before extraction, so large partitions start earlier
    (better CPU utilization at the tail end).
-3. **Buffer reuse**: Decompression buffers are allocated once per worker and reused across operations, reducing allocator pressure.
+3. **Buffer reuse**: Decompression buffers are allocated once per worker and reused across operations,
+   reducing memory allocation overhead.
 
 #### Why It Did Not Help
 
@@ -162,11 +163,11 @@ that overwhelms the benefit of parallel decompression.
 
 #### Insight
 
-The temp-file approach paid an I/O tax because it **separated decompression from writing**. What if workers could write
+The temp-file approach had extra I/O overhead because it **separated decompression from writing**. What if workers could write
 decompressed data **directly** to the output file, in the correct order?
 
 The challenge: operations within a partition must be written sequentially (operation N must complete before operation N+1, because
-later operations may overwrite earlier ones, and `ExtentCursor` expects monotonic extent traversal). But workers pull tasks from a
+later operations may overwrite earlier ones, and `ExtentCursor` expects sequential block access). But workers pull tasks from a
 global queue in unpredictable order.
 
 #### Architecture
@@ -212,7 +213,7 @@ Phase 3: Main thread drains leftover pending
 
 3. **Chain flush**: After writing op N, the worker (or main thread) automatically checks if op N+1 is already
    in `pending`, and if so, writes it immediately. This cascades, so a burst of out-of-order operations can be
-   drained in a single critical section.
+   drained in a single pass.
 
 4. **Disk-space check**: Before any file creation, `statvfs` checks the output directory. If space < required,
    the engine returns `InsufficientDiskSpace` with a human-friendly message showing required vs available space.
@@ -243,7 +244,7 @@ merge logic are interleaved, so the output file is populated continuously rather
 | system | **18.3s, 337 MiB/s** | 23.1s, 266 MiB/s | 49.4s, 124 MiB/s | 37.9s, 162 MiB/s |
 | full | **18.3s, 359 MiB/s** | 18.0s, 365 MiB/s | 20.7s, 318 MiB/s | 21.9s, 300 MiB/s |
 
-> `system` c=4 (49.4s) is an outlier—likely scheduler jitter on the 8C/16T CPU. c=2 and c=8 are more representative.
+> `system` c=4 (49.4s) is an outlier, likely due to scheduler noise on the 8C/16T CPU. c=2 and c=8 are more representative.
 
 ---
 
@@ -314,3 +315,38 @@ merge logic are interleaved, so the output file is populated continuously rather
 - [x] Temp files → streaming: major gains on **all** workloads
 - [x] Disk space check implemented and tested
 - [x] Full extraction c=1: +452% vs baseline (was −32% with temp files)
+
+---
+
+## 7. Post-Streaming: Compress Engine Refactor
+
+After the streaming engine stabilized, the remaining system dependencies were
+`liblzma`, `libzstd`, and `libbz2`. We migrated XZ and Zstd decompression to
+Zig's standard library:
+
+| Compression | Before | After |
+|-------------|--------|-------|
+| XZ | `liblzma` FFI | `std.compress.xz` |
+| Zstd | `libzstd` FFI | `std.compress.zstd` |
+| Bzip2 | `libbz2` FFI | `libbz2` FFI (unchanged) |
+
+### Impact on Synthetic Benchmarks
+
+The refactor had a measurable impact on single-threaded performance:
+
+| Payload | Before (C FFI) | After (Zig std) | Delta |
+|---------|----------------|-----------------|-------|
+| bench32 c=1 | 419 ms | 305 ms | **−27%** |
+| bench128 c=1 | 1 490 ms | 1 137 ms | **−24%** |
+| bench256 c=1 | 2 920 ms | 2 108 ms | **−28%** |
+| bench512 c=1 | 6 002 ms | 4 319 ms | **−28%** |
+
+Multi-threaded performance was largely unchanged (±3%), confirming that the
+bottleneck at high concurrency shifts from decompression throughput to
+synchronization overhead.
+
+### Remaining Work
+
+Bzip2 is the sole remaining C FFI dependency. A native Zig bzip2 decoder would
+eliminate `libbz2.so` entirely, but `std.compress` does not yet include one.
+Options: wait for upstream, port one, or bundle a statically-linked `lbzip2`.

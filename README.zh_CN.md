@@ -8,9 +8,6 @@ Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数
 放在 zip 包里面。这个工具可以读取 `payload.bin`，并把里面每个分区的镜像（比如
 `boot.img`、`vbmeta.img`、`system.img` 等）单独提取出来。
 
-> [!IMPORTANT]
-> 需要 Zig 0.16.0 或更高版本
-
 ## 功能
 
 - 从 `payload.bin` 文件中提取分区镜像
@@ -26,7 +23,9 @@ Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数
 
 - Zig 0.16.0 或更高版本
 - `protoc`（Protocol Buffers 编译器），需要支持 upb
-- 系统库：`upb`、`utf8_range`、`lzma`、`bz2`、`zstd`
+- 系统库：`upb`、`utf8_range`、`bz2`
+  - XZ 和 Zstd 使用 Zig 原生 `std.compress`（无需系统库）
+  - 仅 bzip2 仍需 `libbz2.so`
 
 ### 安装系统依赖
 
@@ -36,7 +35,7 @@ Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数
 
 ```bash
 sudo apt update
-sudo apt install -y protobuf-compiler liblzma-dev libbz2-dev libzstd-dev libupb-dev libgrpc-dev
+sudo apt install -y protobuf-compiler libbz2-dev libupb-dev libgrpc-dev
 ```
 
 > Debian 上 `libupb.so` 由 `libgrpc-dev` 提供
@@ -44,13 +43,13 @@ sudo apt install -y protobuf-compiler liblzma-dev libbz2-dev libzstd-dev libupb-
 #### Fedora
 
 ```bash
-sudo dnf install -y protobuf-compiler xz-devel bzip2-devel libzstd-devel grpc-devel
+sudo dnf install -y protobuf-compiler bzip2-devel grpc-devel
 ```
 
 #### Arch Linux
 
 ```bash
-sudo pacman -S --needed protobuf xz bzip2 zstd grpc
+sudo pacman -S --needed protobuf bzip2 grpc
 ```
 
 > Arch 的 `grpc` 包包含 `libupb.so`，`upb` 和 `utf8_range` 没有单独官方的包
@@ -58,7 +57,7 @@ sudo pacman -S --needed protobuf xz bzip2 zstd grpc
 #### Gentoo
 
 ```bash
-sudo emerge --ask dev-libs/protobuf app-arch/xz-utils app-arch/bzip2 app-arch/zstd net-libs/grpc
+sudo emerge --ask dev-libs/protobuf app-arch/bzip2 net-libs/grpc
 ```
 
 > Gentoo 的 `dev-libs/protobuf` 有 `libupb` USE 标志。如果你的系统配置没有编译出可链接的 `upb`/`utf8_range`，
@@ -178,33 +177,34 @@ zig build bench_pressure -- /path/to/payload.bin
 
 ### 与 payload-dumper-go 的性能对比
 
-以下数据均为 wall-clock 时间（hyperfine 5 次取均值）。
+以下数据均为实际运行时间（hyperfine 5 次取均值）。
 
 **测试机器：** AMD Ryzen 7 4800H（8 核 / 16 线程），22 GB DDR4，
 ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
 
 测试样本是一个 **78 MB** 的合成 payload
 （`scripts/generate_sample_payload.py --total-mb 128`），
-覆盖了 `REPLACE`、`REPLACE_XZ`、`REPLACE_BZ`、`ZSTD` 和 `ZERO` 五种操作类型。
+包含 `REPLACE`、`REPLACE_XZ`、`REPLACE_BZ`、`ZSTD` 和 `ZERO` 五种操作类型。
 
 | 场景 | 并发数 | zpayload-dumper | payload-dumper-go | 加速比 |
 |------|--------|-----------------|-------------------|--------|
-| `payload.bin` | 1 线程 | 1 490 ms | **1 372 ms** | 0.9 倍 |
-| `payload.bin` | 4 线程 | 533 ms | **427 ms** | 0.8 倍 |
-| `payload.bin` | 8 线程 | 363 ms | **311 ms** | 0.9 倍 |
+| `payload.bin` | 1 线程 | **1 137 ms** | 1 378 ms | **1.21 倍** |
+| `payload.bin` | 4 线程 | **409 ms** | 467 ms | **1.14 倍** |
+| `payload.bin` | 8 线程 | 308 ms | **295 ms** | 0.96 倍 |
 | `ota_update.zip` | 4 线程 | 625 ms | **523 ms** | 0.8 倍 |
 
 说明：
 
-- **已修正并发语义**：这些结果基于修正后的实现重新测量，`--concurrency`
-  现在会真正限制 worker 数，不再隐式扩展到 CPU 线程数。
-- **扩展性**：zpayload-dumper 现在会随着并发度提升而加速，但在 `bench128`
-  的最终 5 轮结果里，最佳值仍落后于 payload-dumper-go。
-- **高并发差距收敛**：并发数升高后，差距明显缩小。在 `bench128` 上，
-  `c=8..16` 时双方只差约 10-17 %。
+- **解压缩引擎重构**：XZ 和 Zstd 从 C FFI（`liblzma`、`libzstd`）迁移到
+  Zig 标准库（`std.compress.xz`、`std.compress.zstd`）。这移除了两个系统
+  依赖，并将单线程吞吐提升了约 25%。
+- **单线程全面领先**：Zig 在 `c=1` 的所有 payload 尺寸上均领先（1.12–1.42×）。
+  大 payload（`bench256`、`bench512`）的 `c=2–16` 差距基本消失（±4% 以内）。
+- **Go 的调度器在小负载高并发下占优**：`bench32` 在 `c≥4` 时 Go 反超
+  （最高 1.31× 于 `c=16`），goroutine 上下文切换开销低于 Zig 的线程池 + 互斥锁。
 - **Zip 输入**：zip 解包对两边都有额外开销，而且当前 Go 实现同样更快。
 
-> 完整的 benchmark 矩阵（bench32/128/256/512、并发扩展性分析、瓶颈拆解）
+> 完整的 benchmark 矩阵（bench32/128/256/512、不同线程数下的扩展性分析、性能分析）
 > 见 [`docs/COMPARISON.md`](docs/COMPARISON.md)。
 
 ### 生成测试数据

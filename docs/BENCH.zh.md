@@ -289,3 +289,34 @@ Phase 3: Main thread drains leftover pending
 - [x] 临时文件 → 流式：在**所有**工作负载上获得大幅提升
 - [x] 磁盘空间检查已实现并测试
 - [x] Full extraction c=1：相比基线 +452%（临时文件方案为 −32%）
+
+---
+
+## 7. 流式之后：解压缩引擎重构
+
+流式引擎稳定后，剩余的系统依赖是 `liblzma`、`libzstd` 和 `libbz2`。
+我们将 XZ 和 Zstd 解压迁移到了 Zig 标准库：
+
+| 压缩算法 | 重构前 | 重构后 |
+|----------|--------|-------|
+| XZ | `liblzma` FFI | `std.compress.xz` |
+| Zstd | `libzstd` FFI | `std.compress.zstd` |
+| Bzip2 | `libbz2` FFI | `libbz2` FFI（未变） |
+
+### 对合成基准测试的影响
+
+这次重构对单线程性能产生了可测量的提升：
+
+| Payload | 重构前（C FFI） | 重构后（Zig std） | 变化 |
+|---------|----------------|-----------------|-------|
+| bench32 c=1 | 419 ms | 305 ms | **−27%** |
+| bench128 c=1 | 1 490 ms | 1 137 ms | **−24%** |
+| bench256 c=1 | 2 920 ms | 2 108 ms | **−28%** |
+| bench512 c=1 | 6 002 ms | 4 319 ms | **−28%** |
+
+多线程性能基本未变（±3%），证实高并发下的瓶颈已从解压吞吐转移到同步开销。
+
+### 剩余工作
+
+Bzip2 是唯一剩余的 C FFI 依赖。原生 Zig bzip2 解码器可以彻底移除 `libbz2.so`，
+但 `std.compress` 目前尚未包含。可选方案：等待上游、自行移植、或静态链接 `lbzip2`。

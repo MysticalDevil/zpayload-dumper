@@ -4,16 +4,15 @@
 
 Zig implementation of Android `payload.bin` dumper.
 
-> [!IMPORTANT]
-> This project currently targets Zig `0.16.0` and the current codebase is organized around Zig 0.16 APIs.
-
 ## Install
 
 Prerequisites:
 
 - Zig `0.16.0` (install via your distro package manager or [ziglang.org](https://ziglang.org))
 - `protoc` with `--upb_out` and `--upb_minitable_out` plugins
-- System libs: `upb`, `utf8_range`, `lzma`, `bz2`, `zstd`
+- System libs: `upb`, `utf8_range`, `bz2`
+  - XZ and Zstd use Zig's native `std.compress` (no system libs needed)
+  - Only bzip2 still requires `libbz2.so`
 
 ### Distro Support
 
@@ -35,13 +34,13 @@ Prerequisites:
 #### Arch Linux
 
 ```bash
-sudo pacman -S --needed protobuf xz bzip2 zstd
+sudo pacman -S --needed protobuf bzip2
 ```
 
 #### Gentoo
 
 ```bash
-sudo emerge --ask dev-libs/protobuf app-arch/xz-utils app-arch/bzip2 app-arch/zstd
+sudo emerge --ask dev-libs/protobuf app-arch/bzip2
 ```
 
 ### Building protobuf from source (Ubuntu / Debian / Fedora)
@@ -51,9 +50,9 @@ If your distro does not provide a recent enough `protoc` with upb plugins, build
 ```bash
 # 1. Install build dependencies
 # Ubuntu/Debian:
-sudo apt install -y cmake g++ git liblzma-dev libbz2-dev libzstd-dev
+sudo apt install -y cmake g++ git libbz2-dev
 # Fedora:
-sudo dnf install -y cmake gcc-c++ git xz-devel bzip2-devel libzstd-devel
+sudo dnf install -y cmake gcc-c++ git bzip2-devel
 
 # 2. Build & install protobuf (includes protoc + libupb + upb generators)
 git clone https://github.com/protocolbuffers/protobuf.git
@@ -138,7 +137,7 @@ Environment variables:
 
 Disk space check:
 
-Before extraction begins, the engine checks available disk space via `statvfs`. If the output directory does not have enough free
+Before extraction begins, the tool checks available disk space. If the output directory does not have enough free
 space for the selected partitions, extraction aborts immediately with a clear error message showing required vs available space.
 
 Examples:
@@ -177,7 +176,7 @@ zig build test_stress
 - selected partition concurrency matrix (`1/2/4/8`, repeated rounds)
 - repeated full extraction stability rounds
 
-End-to-end regression check (extract + hash-compare with generated baseline):
+End-to-end test (extract and compare hashes against expected output):
 
 ```bash
 zig build check_e2e
@@ -204,7 +203,7 @@ zig build bench_pressure -- /path/to/payload.bin
 
 ## Current Support
 
-- Payload header parse: `CrAU`, version `2`, manifest/signature lengths.
+- Payload header parsing: `CrAU`, version `2`, manifest/signature lengths.
 - Protobuf decode via `upb` (`DeltaArchiveManifest`, `Signatures`).
 - Operations:
   - `REPLACE`
@@ -212,14 +211,14 @@ zig build bench_pressure -- /path/to/payload.bin
   - `REPLACE_BZ`
   - `ZSTD`
   - `ZERO`
-- SHA-256 verification for operation data blobs.
+- SHA-256 verification for operation data.
 - Input:
   - raw `payload.bin`
   - `.zip` containing `payload.bin`
 
 ## Benchmark vs payload-dumper-go
 
-All numbers below are wall-clock time (mean of 5 runs, hyperfine).
+All numbers below are actual runtime (mean of 5 runs, hyperfine).
 
 **Test machine:** AMD Ryzen 7 4800H (8c/16t), 22 GB DDR4, ZHITAI TiPlus7100 1TB NVMe,
 Gentoo Linux (kernel 7.0.0-gentoo-dist).
@@ -230,25 +229,28 @@ The test payload is a **78 MB** synthetic sample
 
 | Scenario | Concurrency | zpayload-dumper | payload-dumper-go | Speed-up |
 |----------|-------------|-----------------|-------------------|----------|
-| `payload.bin` | 1 worker | 1 490 ms | **1 372 ms** | 0.9× |
-| `payload.bin` | 4 workers | 533 ms | **427 ms** | 0.8× |
-| `payload.bin` | 8 workers | 363 ms | **311 ms** | 0.9× |
+| `payload.bin` | 1 worker | **1 137 ms** | 1 378 ms | **1.21×** |
+| `payload.bin` | 4 workers | **409 ms** | 467 ms | **1.14×** |
+| `payload.bin` | 8 workers | 308 ms | **295 ms** | 0.96× |
 | `ota_update.zip` | 4 workers | 625 ms | **523 ms** | 0.8× |
 
 Observations:
 
-- **Corrected concurrency semantics**: These numbers were rerun after fixing
-  `--concurrency` to honor the configured worker count instead of implicitly
-  widening to CPU thread count.
-- **Scaling**: zpayload-dumper now scales with concurrency, but the best result
-  still trails payload-dumper-go on the `bench128` sample.
-- **Gap at higher concurrency**: The difference narrows as concurrency rises.
-  On `bench128`, the gap shrinks to roughly 10-17 % at `c=8..16`.
+- **Compress engine refactor**: XZ and Zstd decompression were migrated from
+  C FFI (`liblzma`, `libzstd`) to Zig standard library (`std.compress.xz`,
+  `std.compress.zstd`). This eliminated two system dependencies and improved
+  single-threaded throughput by ~25%.
+- **Single-threaded lead**: Zig wins at `c=1` across all payload sizes
+  (1.12–1.42×). On larger payloads (`bench256`, `bench512`), the gap
+  essentially disappears at `c=2–16` (within ±4%).
+- **Go's scheduler wins on tiny workloads at high concurrency**: `bench32`
+  at `c≥4` shows Go pulling ahead (up to 1.31× at `c=16`), where goroutine
+  context-switch overhead is lower than Zig's thread pool + mutex.
 - **Zip input**: Zip extraction remains slower than raw `payload.bin` for both
   tools, and the Go implementation currently leads there as well.
 
 > See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the full benchmark matrix
-> (bench32/128/256/512, concurrency scaling analysis, and bottleneck breakdown).
+> (bench32/128/256/512, scaling across different thread counts, and performance analysis).
 
 ## Synthetic Sample Generator
 
