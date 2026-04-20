@@ -7,40 +7,17 @@ pub const Ui = struct {
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     colors: types.ResolvedColors,
-    terminal: types.TerminalCapabilities,
 
     pub fn init(
         stdout: *std.Io.Writer,
         stderr: *std.Io.Writer,
         colors: types.ResolvedColors,
-        terminal: types.TerminalCapabilities,
     ) Ui {
         return .{
             .stdout = stdout,
             .stderr = stderr,
             .colors = colors,
-            .terminal = terminal,
         };
-    }
-
-    pub fn stdoutWriter(self: *const Ui) *std.Io.Writer {
-        return self.stdout;
-    }
-
-    pub fn stderrWriter(self: *const Ui) *std.Io.Writer {
-        return self.stderr;
-    }
-
-    pub fn stdoutUsesColor(self: Ui) bool {
-        return self.colors.stdout;
-    }
-
-    pub fn stderrUsesColor(self: Ui) bool {
-        return self.colors.stderr;
-    }
-
-    pub fn stdoutIsTty(self: Ui) bool {
-        return self.terminal.stdout_is_tty;
     }
 
     pub fn info(self: *const Ui, message: []const u8) !void {

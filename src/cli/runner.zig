@@ -11,7 +11,12 @@ const Error = errors.AppError;
 const default_tmp_base = "/tmp";
 const zip_suffix = ".zip";
 
-pub fn run(init: std.process.Init, options: *const types.CliOptions, ui: *const cli_ui.Ui) Error!void {
+pub fn run(
+    init: std.process.Init,
+    options: *const types.CliOptions,
+    ui: *const cli_ui.Ui,
+    reporter: *const payload.Reporter,
+) Error!void {
     const gpa = init.gpa;
     const io = init.io;
 
@@ -51,7 +56,7 @@ pub fn run(init: std.process.Init, options: *const types.CliOptions, ui: *const 
         const partition_message = std.fmt.bufPrint(&partition_buffer, "manifest parsed, partitions: {d}", .{partition_count}) catch return error.IoFailure;
         ui.info(partition_message) catch return error.IoFailure;
     }
-    dumper.printPartitionList(ui.stdoutWriter()) catch return error.IoFailure;
+    dumper.printPartitionList(reporter.out) catch return error.IoFailure;
 
     if (options.list) {
         ui.success("list mode complete") catch return error.IoFailure;
@@ -75,13 +80,6 @@ pub fn run(init: std.process.Init, options: *const types.CliOptions, ui: *const 
         ui.info(workers_message) catch return error.IoFailure;
     }
 
-    var reporter = payload.Reporter.init(
-        ui.stdoutWriter(),
-        ui.stderrWriter(),
-        ui.stdoutUsesColor(),
-        ui.stdoutIsTty(),
-    );
-
     if (options.partitions) |parts_csv| {
         var selected = std.array_list.Managed([]const u8).init(gpa);
         defer selected.deinit();
@@ -92,10 +90,10 @@ pub fn run(init: std.process.Init, options: *const types.CliOptions, ui: *const 
             const select_message = std.fmt.bufPrint(&select_buffer, "extracting selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
             ui.info(select_message) catch return error.IoFailure;
         }
-        try dumper.extractSelected(out_path, selected.items, @intCast(options.concurrency), &reporter, render.sink);
+        try dumper.extractSelected(out_path, selected.items, @intCast(options.concurrency), reporter, render.sink);
     } else {
         ui.info("extracting all partitions") catch return error.IoFailure;
-        try dumper.extractAll(out_path, @intCast(options.concurrency), &reporter, render.sink);
+        try dumper.extractSelected(out_path, &.{}, @intCast(options.concurrency), reporter, render.sink);
     }
 
     ui.success("extraction complete") catch return error.IoFailure;
