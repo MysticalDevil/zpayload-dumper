@@ -73,9 +73,7 @@ fn attachPayloadDeps(
 
     module.linkSystemLibrary("upb", .{});
     module.linkSystemLibrary("utf8_range", .{});
-    module.linkSystemLibrary("lzma", .{});
     module.linkSystemLibrary("bz2", .{});
-    module.linkSystemLibrary("zstd", .{});
 }
 
 fn attachIntegrationImport(module: *std.Build.Module, zpayload_mod: *std.Build.Module) void {
