@@ -98,6 +98,8 @@ const Task = struct {
     operation_index: usize,
 };
 
+const PendingMap = std.AutoHashMapUnmanaged(usize, PendingChunk);
+
 const PendingData = union(enum) {
     memory: []u8,
     tmp_file: []const u8,
@@ -113,10 +115,58 @@ const PartitionWriteState = struct {
     output_path: []const u8,
     output_file: std.Io.File,
     next_expected_op: std.atomic.Value(usize),
-    pending: std.array_list.Managed(PendingChunk),
+    pending: PendingMap,
     pending_mutex: std.Io.Mutex,
     completed_ops: std.atomic.Value(usize),
     has_errors: std.atomic.Value(bool),
+    next_enqueued_op: usize,
+};
+
+const TaskQueue = struct {
+    tasks: []Task,
+    head: usize = 0,
+    tail: usize = 0,
+    len: usize = 0,
+    closed: bool = false,
+    mutex: std.Io.Mutex = .init,
+    semaphore: std.Io.Semaphore = .{},
+
+    fn push(self: *TaskQueue, io: std.Io, task: Task) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        std.debug.assert(!self.closed);
+        std.debug.assert(self.len < self.tasks.len);
+        self.tasks[self.tail] = task;
+        self.tail = (self.tail + 1) % self.tasks.len;
+        self.len += 1;
+        self.semaphore.post(io);
+    }
+
+    fn pop(self: *TaskQueue, io: std.Io) ?Task {
+        self.semaphore.waitUncancelable(io);
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+
+        if (self.len == 0) {
+            std.debug.assert(self.closed);
+            return null;
+        }
+
+        const task = self.tasks[self.head];
+        self.head = (self.head + 1) % self.tasks.len;
+        self.len -= 1;
+        return task;
+    }
+
+    fn close(self: *TaskQueue, io: std.Io, worker_count: usize) void {
+        self.mutex.lockUncancelable(io);
+        const already_closed = self.closed;
+        self.closed = true;
+        self.mutex.unlock(io);
+
+        if (already_closed) return;
+        for (0..worker_count) |_| self.semaphore.post(io);
+    }
 };
 
 const MemoryBudget = struct {
@@ -151,9 +201,11 @@ const Shared = struct {
     payload_file: std.Io.File,
     io: std.Io,
     plan: *const extract_plan.Plan,
-    tasks: []const Task,
-    next_task: std.atomic.Value(usize),
+    task_queue: *TaskQueue,
     completed_tasks: std.atomic.Value(usize),
+    total_tasks: usize,
+    worker_count: usize,
+    window_size: usize,
     partitions: []PartitionWriteState,
     budget: *MemoryBudget,
     tracker: *progress.ProgressTracker,
@@ -201,28 +253,51 @@ pub fn run(
         return error.InsufficientDiskSpace;
     }
 
-    // --- Phase 2: Pre-allocate output files and build per-partition write states ---
+    // --- Phase 2: Prepare spill directory and memory budget ---
+    const spill_dir = try std.fmt.allocPrint(allocator, "{s}/.zpayload_spill", .{output_dir});
+    defer allocator.free(spill_dir);
+    std.Io.Dir.cwd().createDirPath(io, spill_dir) catch {};
+
+    var budget = MemoryBudget.init(256 * 1024 * 1024); // 256 MB
+
+    // --- Phase 3: Pre-allocate output files and build per-partition write states ---
     var partitions = try allocator.alloc(PartitionWriteState, plan.jobs.len);
     defer {
         for (partitions) |*part| {
             part.output_file.close(io);
             allocator.free(part.output_path);
-            for (part.pending.items) |*chunk| {
-                switch (chunk.data) {
-                    .memory => |mem| allocator.free(mem),
-                    .tmp_file => |path| {
-                        std.Io.Dir.cwd().deleteFile(io, path) catch {};
-                        allocator.free(path);
-                    },
-                }
+            var pending_it = part.pending.valueIterator();
+            while (pending_it.next()) |chunk| {
+                cleanupPendingData(io, allocator, &budget, chunk);
             }
-            part.pending.deinit();
+            part.pending.deinit(allocator);
             // job.name, operations and extents are arena-allocated; freed with plan.deinit()
         }
         allocator.free(partitions);
     }
 
+    const window_size = blk: {
+        const doubled = std.math.mul(usize, concurrency, 2) catch std.math.maxInt(usize);
+        break :blk @max(@as(usize, 1), doubled);
+    };
+
+    var queue_capacity: usize = 0;
+    for (plan.jobs) |job| {
+        queue_capacity = std.math.add(
+            usize,
+            queue_capacity,
+            @min(job.total_operations, window_size),
+        ) catch return error.IntegerOverflow;
+    }
+
+    const queue_storage = try allocator.alloc(Task, queue_capacity);
+    defer allocator.free(queue_storage);
+    var task_queue = TaskQueue{ .tasks = queue_storage };
+
+    var total_tasks: usize = 0;
     for (plan.jobs, 0..) |job, pidx| {
+        total_tasks = std.math.add(usize, total_tasks, job.total_operations) catch return error.IntegerOverflow;
+
         const output_path = try std.fmt.allocPrint(allocator, "{s}/{s}.img", .{ output_dir, job.name });
         {
             var out = std.Io.Dir.cwd().createFile(io, output_path, .{ .truncate = true }) catch return error.IoFailure;
@@ -231,37 +306,25 @@ pub fn run(
         }
         const out_file = std.Io.Dir.cwd().openFile(io, output_path, .{ .mode = .read_write }) catch return error.IoFailure;
 
+        const initial_window = @min(job.total_operations, window_size);
         partitions[pidx] = .{
             .job = job,
             .output_path = output_path,
             .output_file = out_file,
             .next_expected_op = .init(0),
-            .pending = std.array_list.Managed(PendingChunk).init(allocator),
+            .pending = .empty,
             .pending_mutex = .init,
             .completed_ops = .init(0),
             .has_errors = .init(false),
+            .next_enqueued_op = initial_window,
         };
-    }
 
-    // --- Phase 3: Build flat task queue ---
-    var tasks = std.array_list.Managed(Task).init(allocator);
-    defer tasks.deinit();
-    for (plan.jobs, 0..) |job, pidx| {
-        for (0..job.total_operations) |oidx| {
-            try tasks.append(.{ .partition_index = pidx, .operation_index = oidx });
+        for (0..initial_window) |oidx| {
+            task_queue.push(io, .{ .partition_index = pidx, .operation_index = oidx });
         }
     }
-    const task_slice = try tasks.toOwnedSlice();
-    defer allocator.free(task_slice);
 
-    // --- Phase 4: Prepare spill directory and memory budget ---
-    const spill_dir = try std.fmt.allocPrint(allocator, "{s}/.zpayload_spill", .{output_dir});
-    defer allocator.free(spill_dir);
-    std.Io.Dir.cwd().createDirPath(io, spill_dir) catch {};
-
-    var budget = MemoryBudget.init(256 * 1024 * 1024); // 256 MB
-
-    const worker_count = @min(concurrency, task_slice.len);
+    const worker_count = @min(concurrency, total_tasks);
     const threads = try allocator.alloc(std.Thread, worker_count);
     defer allocator.free(threads);
 
@@ -269,9 +332,11 @@ pub fn run(
         .payload_file = payload_file,
         .io = io,
         .plan = plan,
-        .tasks = task_slice,
-        .next_task = .init(0),
+        .task_queue = &task_queue,
         .completed_tasks = .init(0),
+        .total_tasks = total_tasks,
+        .worker_count = worker_count,
+        .window_size = window_size,
         .partitions = partitions,
         .budget = &budget,
         .tracker = tracker,
@@ -295,30 +360,21 @@ pub fn run(
             continue;
         }
 
-        part.pending_mutex.lockUncancelable(io);
-        const expected = part.next_expected_op.load(.monotonic);
-        part.pending_mutex.unlock(io);
-
-        // Sort pending by op_index to allow sequential drain
-        if (part.pending.items.len > 0) {
-            const SortContext = struct {
-                pub fn lessThan(_: void, a: PendingChunk, b: PendingChunk) bool {
-                    return a.op_index < b.op_index;
-                }
-            };
-            std.mem.sort(PendingChunk, part.pending.items, {}, SortContext.lessThan);
-        }
-
         var writer_buf: [64 * 1024]u8 = undefined;
-        var next = expected;
-        for (part.pending.items) |*chunk| {
-            if (chunk.op_index != next) break; // gap exists, cannot continue
+        while (true) {
+            part.pending_mutex.lockUncancelable(io);
+            const next = part.next_expected_op.load(.monotonic);
+            const entry = part.pending.fetchRemove(next);
+            part.pending_mutex.unlock(io);
+
+            const chunk = if (entry) |kv| kv.value else break;
             const op = part.job.operations[chunk.op_index];
             const data_to_write = switch (chunk.data) {
                 .memory => |mem| mem,
                 .tmp_file => |path| readSpillFile(&shared, path) catch |err| {
                     const msg = std.fmt.allocPrint(allocator, "failed to read spill file for pending op {d} of {s}: {s}", .{ chunk.op_index, part.job.name, @errorName(err) }) catch null;
                     if (msg) |m| collector.addOwned(m);
+                    cleanupPendingData(io, shared.allocator, &budget, &chunk);
                     part.has_errors.store(true, .release);
                     break;
                 },
@@ -326,15 +382,19 @@ pub fn run(
             const success = writeOpData(io, part.output_file, &writer_buf, op, data_to_write) catch |err| {
                 const msg = std.fmt.allocPrint(allocator, "failed to drain pending op {d} for {s}: {s}", .{ chunk.op_index, part.job.name, @errorName(err) }) catch null;
                 if (msg) |m| collector.addOwned(m);
+                cleanupPendingData(io, shared.allocator, &budget, &chunk);
                 part.has_errors.store(true, .release);
                 break;
             };
             if (!success) {
+                cleanupPendingData(io, shared.allocator, &budget, &chunk);
                 part.has_errors.store(true, .release);
                 break;
             }
-            cleanupPendingData(io, shared.allocator, &budget, chunk);
-            next += 1;
+            cleanupPendingData(io, shared.allocator, &budget, &chunk);
+            part.pending_mutex.lockUncancelable(io);
+            part.next_expected_op.store(next + 1, .monotonic);
+            part.pending_mutex.unlock(io);
         }
 
         if (!part.has_errors.load(.acquire)) {
@@ -356,13 +416,13 @@ fn workerMain(shared: *Shared) void {
     var compress_in_buf: [compress.chunk_size]u8 = undefined;
     var compress_out_buf: [compress.chunk_size]u8 = undefined;
     var zero_buf: [1024 * 1024]u8 = undefined;
+    var writer_buf: [64 * 1024]u8 = undefined;
+    var buffer = std.array_list.Managed(u8).init(shared.allocator);
+    defer buffer.deinit();
     @memset(&zero_buf, 0);
 
     while (true) {
-        const index = shared.next_task.fetchAdd(1, .monotonic);
-        if (index >= shared.tasks.len) break;
-
-        const task = shared.tasks[index];
+        const task = shared.task_queue.pop(shared.io) orelse break;
         const part = &shared.partitions[task.partition_index];
         const op = part.job.operations[task.operation_index];
 
@@ -371,14 +431,12 @@ fn workerMain(shared: *Shared) void {
         }
 
         if (part.has_errors.load(.acquire)) {
-            _ = part.completed_ops.fetchAdd(1, .release);
-            _ = shared.completed_tasks.fetchAdd(1, .release);
+            scheduleNextTask(shared, task.partition_index);
+            finishTask(shared, task.partition_index, false);
             continue;
         }
 
-        // Decompress into a local ArrayList buffer.
-        var buffer = std.array_list.Managed(u8).init(shared.allocator);
-        defer buffer.deinit();
+        buffer.clearRetainingCapacity();
         var al_writer = ArrayListWriter.init(&buffer);
         var hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
@@ -423,7 +481,8 @@ fn workerMain(shared: *Shared) void {
 
         if (write_result) |_| {} else |err| {
             recordError(shared, part, task.operation_index, err);
-            _ = shared.completed_tasks.fetchAdd(1, .release);
+            scheduleNextTask(shared, task.partition_index);
+            finishTask(shared, task.partition_index, false);
             continue;
         }
 
@@ -435,15 +494,16 @@ fn workerMain(shared: *Shared) void {
             part.pending_mutex.unlock(shared.io);
 
             // Direct write
-            var writer_buf: [64 * 1024]u8 = undefined;
             const success = writeOpData(shared.io, part.output_file, &writer_buf, op, data) catch |err| {
                 recordError(shared, part, task.operation_index, err);
-                _ = shared.completed_tasks.fetchAdd(1, .release);
+                scheduleNextTask(shared, task.partition_index);
+                finishTask(shared, task.partition_index, false);
                 continue;
             };
             if (!success) {
                 recordError(shared, part, task.operation_index, error.UnexpectedBytesWritten);
-                _ = shared.completed_tasks.fetchAdd(1, .release);
+                scheduleNextTask(shared, task.partition_index);
+                finishTask(shared, task.partition_index, false);
                 continue;
             }
 
@@ -458,15 +518,20 @@ fn workerMain(shared: *Shared) void {
                 const copy = shared.allocator.dupe(u8, data) catch {
                     part.pending_mutex.unlock(shared.io);
                     recordError(shared, part, task.operation_index, error.OutOfMemory);
-                    _ = shared.completed_tasks.fetchAdd(1, .release);
+                    scheduleNextTask(shared, task.partition_index);
+                    finishTask(shared, task.partition_index, false);
                     continue;
                 };
-                part.pending.append(.{ .op_index = task.operation_index, .data = .{ .memory = copy } }) catch {
+                part.pending.put(shared.allocator, task.operation_index, .{
+                    .op_index = task.operation_index,
+                    .data = .{ .memory = copy },
+                }) catch {
                     part.pending_mutex.unlock(shared.io);
                     shared.allocator.free(copy);
                     shared.budget.release(data.len);
                     recordError(shared, part, task.operation_index, error.OutOfMemory);
-                    _ = shared.completed_tasks.fetchAdd(1, .release);
+                    scheduleNextTask(shared, task.partition_index);
+                    finishTask(shared, task.partition_index, false);
                     continue;
                 };
             } else {
@@ -474,14 +539,16 @@ fn workerMain(shared: *Shared) void {
                 const tmp_path = std.fmt.allocPrint(shared.allocator, "{s}/p{d}_op{d}.tmp", .{ shared.spill_dir, task.partition_index, task.operation_index }) catch {
                     part.pending_mutex.unlock(shared.io);
                     recordError(shared, part, task.operation_index, error.OutOfMemory);
-                    _ = shared.completed_tasks.fetchAdd(1, .release);
+                    scheduleNextTask(shared, task.partition_index);
+                    finishTask(shared, task.partition_index, false);
                     continue;
                 };
                 var tmp_file = std.Io.Dir.cwd().createFile(shared.io, tmp_path, .{ .truncate = true }) catch |err| {
                     part.pending_mutex.unlock(shared.io);
                     shared.allocator.free(tmp_path);
                     recordError(shared, part, task.operation_index, err);
-                    _ = shared.completed_tasks.fetchAdd(1, .release);
+                    scheduleNextTask(shared, task.partition_index);
+                    finishTask(shared, task.partition_index, false);
                     continue;
                 };
                 var tmp_buf: [64 * 1024]u8 = undefined;
@@ -492,7 +559,8 @@ fn workerMain(shared: *Shared) void {
                     shared.allocator.free(tmp_path);
                     part.pending_mutex.unlock(shared.io);
                     recordError(shared, part, task.operation_index, err);
-                    _ = shared.completed_tasks.fetchAdd(1, .release);
+                    scheduleNextTask(shared, task.partition_index);
+                    finishTask(shared, task.partition_index, false);
                     continue;
                 };
                 tmp_writer.flush() catch |err| {
@@ -501,28 +569,29 @@ fn workerMain(shared: *Shared) void {
                     shared.allocator.free(tmp_path);
                     part.pending_mutex.unlock(shared.io);
                     recordError(shared, part, task.operation_index, err);
-                    _ = shared.completed_tasks.fetchAdd(1, .release);
+                    scheduleNextTask(shared, task.partition_index);
+                    finishTask(shared, task.partition_index, false);
                     continue;
                 };
                 tmp_file.close(shared.io);
-                part.pending.append(.{ .op_index = task.operation_index, .data = .{ .tmp_file = tmp_path } }) catch {
+                part.pending.put(shared.allocator, task.operation_index, .{
+                    .op_index = task.operation_index,
+                    .data = .{ .tmp_file = tmp_path },
+                }) catch {
                     part.pending_mutex.unlock(shared.io);
                     std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch {};
                     shared.allocator.free(tmp_path);
                     recordError(shared, part, task.operation_index, error.OutOfMemory);
-                    _ = shared.completed_tasks.fetchAdd(1, .release);
+                    scheduleNextTask(shared, task.partition_index);
+                    finishTask(shared, task.partition_index, false);
                     continue;
                 };
             }
             part.pending_mutex.unlock(shared.io);
         }
 
-        const completed = part.completed_ops.fetchAdd(1, .release) + 1;
-        shared.tracker.updateOps(task.partition_index, completed);
-        if (completed >= part.job.total_operations) {
-            shared.tracker.markDone(task.partition_index);
-        }
-        _ = shared.completed_tasks.fetchAdd(1, .release);
+        scheduleNextTask(shared, task.partition_index);
+        finishTask(shared, task.partition_index, true);
     }
 }
 
@@ -549,16 +618,7 @@ fn flushPending(shared: *Shared, part: *PartitionWriteState) void {
     var writer_buf: [64 * 1024]u8 = undefined;
     while (true) {
         const next = part.next_expected_op.load(.monotonic);
-        var found_idx: ?usize = null;
-        for (part.pending.items, 0..) |chunk, idx| {
-            if (chunk.op_index == next) {
-                found_idx = idx;
-                break;
-            }
-        }
-        if (found_idx == null) break;
-
-        const chunk = part.pending.orderedRemove(found_idx.?);
+        const chunk = if (part.pending.fetchRemove(next)) |kv| kv.value else break;
         const op = part.job.operations[chunk.op_index];
 
         part.pending_mutex.unlock(shared.io);
@@ -588,6 +648,41 @@ fn flushPending(shared: *Shared, part: *PartitionWriteState) void {
         cleanupPendingData(shared.io, shared.allocator, shared.budget, &chunk);
         part.pending_mutex.lockUncancelable(shared.io);
         part.next_expected_op.store(next + 1, .monotonic);
+    }
+}
+
+fn scheduleNextTask(shared: *Shared, partition_index: usize) void {
+    const part = &shared.partitions[partition_index];
+    shared.task_queue.mutex.lockUncancelable(shared.io);
+    defer shared.task_queue.mutex.unlock(shared.io);
+
+    if (shared.task_queue.closed) return;
+    if (part.next_enqueued_op >= part.job.total_operations) return;
+
+    std.debug.assert(shared.task_queue.len < shared.task_queue.tasks.len);
+    shared.task_queue.tasks[shared.task_queue.tail] = .{
+        .partition_index = partition_index,
+        .operation_index = part.next_enqueued_op,
+    };
+    shared.task_queue.tail = (shared.task_queue.tail + 1) % shared.task_queue.tasks.len;
+    shared.task_queue.len += 1;
+    part.next_enqueued_op += 1;
+    shared.task_queue.semaphore.post(shared.io);
+}
+
+fn finishTask(shared: *Shared, partition_index: usize, update_progress: bool) void {
+    const part = &shared.partitions[partition_index];
+    const completed = part.completed_ops.fetchAdd(1, .release) + 1;
+    if (update_progress) {
+        shared.tracker.updateOps(partition_index, completed);
+        if (completed >= part.job.total_operations) {
+            shared.tracker.markDone(partition_index);
+        }
+    }
+
+    const total_completed = shared.completed_tasks.fetchAdd(1, .release) + 1;
+    if (total_completed == shared.total_tasks) {
+        shared.task_queue.close(shared.io, shared.worker_count);
     }
 }
 
