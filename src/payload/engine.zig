@@ -519,6 +519,9 @@ fn workerMain(shared: *Shared) void {
 
         const completed = part.completed_ops.fetchAdd(1, .release) + 1;
         shared.tracker.updateOps(task.partition_index, completed);
+        if (completed >= part.job.total_operations) {
+            shared.tracker.markDone(task.partition_index);
+        }
         _ = shared.completed_tasks.fetchAdd(1, .release);
     }
 }
