@@ -1,9 +1,67 @@
 const std = @import("std");
 
-fn attachPayloadDeps(b: *std.Build, module: *std.Build.Module, upb_out: std.Build.LazyPath, minitable_out: std.Build.LazyPath) void {
+const BuildOptions = struct {
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+};
+
+fn createRootModule(
+    b: *std.Build,
+    options: BuildOptions,
+    root_source_file: []const u8,
+) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.path(root_source_file),
+        .target = options.target,
+        .optimize = options.optimize,
+        .link_libc = true,
+    });
+}
+
+fn createNamedExecutable(
+    b: *std.Build,
+    name: []const u8,
+    root_module: *std.Build.Module,
+) *std.Build.Step.Compile {
+    return b.addExecutable(.{
+        .name = name,
+        .root_module = root_module,
+    });
+}
+
+fn addRunStep(
+    b: *std.Build,
+    step_name: []const u8,
+    description: []const u8,
+    compile: *std.Build.Step.Compile,
+) void {
+    const run = b.addRunArtifact(compile);
+    if (b.args) |args| run.addArgs(args);
+
+    const step = b.step(step_name, description);
+    step.dependOn(&run.step);
+}
+
+fn createTestRun(
+    b: *std.Build,
+    root_module: *std.Build.Module,
+) *std.Build.Step.Run {
+    const tests = b.addTest(.{
+        .root_module = root_module,
+    });
+    return b.addRunArtifact(tests);
+}
+
+fn attachPayloadDeps(
+    b: *std.Build,
+    module: *std.Build.Module,
+    upb_out: std.Build.LazyPath,
+    minitable_out: std.Build.LazyPath,
+) void {
     module.addIncludePath(upb_out);
     module.addIncludePath(minitable_out);
     module.addIncludePath(b.path("src/c"));
+    module.addIncludePath(b.path("third_party/utf8_range"));
     module.addCSourceFile(.{
         .file = upb_out.path(b, "update_metadata.upb.c"),
     });
@@ -12,6 +70,9 @@ fn attachPayloadDeps(b: *std.Build, module: *std.Build.Module, upb_out: std.Buil
     });
     module.addCSourceFile(.{
         .file = b.path("src/c/upb_wrap.c"),
+    });
+    module.addCSourceFile(.{
+        .file = b.path("third_party/utf8_range/utf8_range.c"),
     });
 
     module.linkSystemLibrary("upb", .{});
@@ -26,8 +87,10 @@ fn attachIntegrationImport(module: *std.Build.Module, zpayload_mod: *std.Build.M
 }
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const options: BuildOptions = .{
+        .target = b.standardTargetOptions(.{}),
+        .optimize = b.standardOptimizeOption(.{}),
+    };
 
     const protoc = b.addSystemCommand(&.{"protoc"});
     const upb_out = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
@@ -37,28 +100,19 @@ pub fn build(b: *std.Build) void {
 
     const translate_upb = b.addTranslateC(.{
         .root_source_file = b.path("src/c/upb_wrap.h"),
-        .target = target,
-        .optimize = optimize,
+        .target = options.target,
+        .optimize = options.optimize,
     });
     const translate_compress = b.addTranslateC(.{
         .root_source_file = b.path("src/c/compress_headers.h"),
-        .target = target,
-        .optimize = optimize,
+        .target = options.target,
+        .optimize = options.optimize,
     });
 
-    const root_module = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
+    const root_module = createRootModule(b, options, "src/main.zig");
     attachPayloadDeps(b, root_module, upb_out, minitable_out);
-    const zpayload_mod = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
+
+    const zpayload_mod = createRootModule(b, options, "src/root.zig");
     attachPayloadDeps(b, zpayload_mod, upb_out, minitable_out);
 
     root_module.addImport("upb", translate_upb.createModule());
@@ -66,95 +120,40 @@ pub fn build(b: *std.Build) void {
     zpayload_mod.addImport("upb", translate_upb.createModule());
     zpayload_mod.addImport("compress", translate_compress.createModule());
 
-    const exe = b.addExecutable(.{
-        .name = "zpayload-dumper",
-        .root_module = root_module,
-    });
+    const exe = createNamedExecutable(b, "zpayload-dumper", root_module);
     b.installArtifact(exe);
+    addRunStep(b, "run", "Run zpayload-dumper", exe);
 
-    const run_cmd = b.addRunArtifact(exe);
-    if (b.args) |args| run_cmd.addArgs(args);
-    const run_step = b.step("run", "Run zpayload-dumper");
-    run_step.dependOn(&run_cmd.step);
-
-    const unit_tests = b.addTest(.{
-        .root_module = root_module,
-    });
-    const run_tests = b.addRunArtifact(unit_tests);
-    const integration_module = b.createModule(.{
-        .root_source_file = b.path("tests/integration.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
+    const run_tests = createTestRun(b, root_module);
+    const integration_module = createRootModule(b, options, "tests/integration.zig");
     attachIntegrationImport(integration_module, zpayload_mod);
-    const integration_tests = b.addTest(.{
-        .root_module = integration_module,
-    });
-    const run_integration = b.addRunArtifact(integration_tests);
+    const run_integration = createTestRun(b, integration_module);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_integration.step);
 
-    const stress_module = b.createModule(.{
-        .root_source_file = b.path("tests/stress_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
+    const check_step = b.step("check", "Run the default quality gate");
+    check_step.dependOn(&run_tests.step);
+    check_step.dependOn(&run_integration.step);
+
+    const stress_module = createRootModule(b, options, "tests/stress_test.zig");
     attachIntegrationImport(stress_module, zpayload_mod);
-    const stress_tests = b.addTest(.{
-        .root_module = stress_module,
-    });
-    const run_stress = b.addRunArtifact(stress_tests);
+    const run_stress = createTestRun(b, stress_module);
     const stress_step = b.step("test_stress", "Run stress/integration tests");
     stress_step.dependOn(&run_stress.step);
 
-    const e2e_module = b.createModule(.{
-        .root_source_file = b.path("tests/e2e_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
+    const e2e_module = createRootModule(b, options, "tests/e2e_test.zig");
     attachIntegrationImport(e2e_module, zpayload_mod);
-    const e2e_exe = b.addExecutable(.{
-        .name = "zpayload_e2e_test",
-        .root_module = e2e_module,
-    });
-    const run_e2e = b.addRunArtifact(e2e_exe);
-    if (b.args) |args| run_e2e.addArgs(args);
-    const e2e_step = b.step("check_e2e", "Extract full payload and compare hashes with generated baseline");
-    e2e_step.dependOn(&run_e2e.step);
+    const e2e_exe = createNamedExecutable(b, "zpayload_e2e_test", e2e_module);
+    addRunStep(b, "check_e2e", "Extract full payload and compare hashes with generated baseline", e2e_exe);
 
-    const bench_module = b.createModule(.{
-        .root_source_file = b.path("tests/smoke_benchmark.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
+    const bench_module = createRootModule(b, options, "tests/smoke_benchmark.zig");
     attachIntegrationImport(bench_module, zpayload_mod);
-    const bench_exe = b.addExecutable(.{
-        .name = "zpayload_smoke_benchmark",
-        .root_module = bench_module,
-    });
-    const run_bench = b.addRunArtifact(bench_exe);
-    if (b.args) |args| run_bench.addArgs(args);
-    const bench_step = b.step("bench_smoke", "Run lightweight extraction benchmark");
-    bench_step.dependOn(&run_bench.step);
+    const bench_exe = createNamedExecutable(b, "zpayload_smoke_benchmark", bench_module);
+    addRunStep(b, "bench_smoke", "Run lightweight extraction benchmark", bench_exe);
 
-    const pressure_bench_module = b.createModule(.{
-        .root_source_file = b.path("tests/pressure_benchmark.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
+    const pressure_bench_module = createRootModule(b, options, "tests/pressure_benchmark.zig");
     attachIntegrationImport(pressure_bench_module, zpayload_mod);
-    const pressure_bench_exe = b.addExecutable(.{
-        .name = "zpayload_pressure_benchmark",
-        .root_module = pressure_bench_module,
-    });
-    const run_pressure_bench = b.addRunArtifact(pressure_bench_exe);
-    if (b.args) |args| run_pressure_bench.addArgs(args);
-    const pressure_bench_step = b.step("bench_pressure", "Run pressure benchmark matrix");
-    pressure_bench_step.dependOn(&run_pressure_bench.step);
+    const pressure_bench_exe = createNamedExecutable(b, "zpayload_pressure_benchmark", pressure_bench_module);
+    addRunStep(b, "bench_pressure", "Run pressure benchmark matrix", pressure_bench_exe);
 }
