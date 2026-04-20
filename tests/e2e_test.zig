@@ -27,12 +27,12 @@ pub fn main(init: std.process.Init) !void {
     var err_buf: [64]u8 = undefined;
     var out_discard = std.Io.Writer.Discarding.init(&out_buf);
     var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter = app.payload.Reporter.init(&out_discard.writer, &err_discard.writer, false, false);
 
     var p = try app.payload.Payload.open(gpa, io, payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractAll(output_dir, 4, &ui);
+    try p.extractAll(output_dir, 4, &reporter, app.payload.Sink.noop);
 
     try app.fs_hash.compareDirs(gpa, io, baseline_dir, output_dir);
     try out.interface.writeAll("[OK] e2e check passed\n");

@@ -25,6 +25,5 @@ pub fn userMessage(err: Error) []const u8 {
         error.IoFailure => "i/o failure while reading or writing payload data",
         error.OutOfMemory => "out of memory",
         error.Usage => "invalid arguments",
-        error.HelpDisplayed => "help displayed",
     };
 }

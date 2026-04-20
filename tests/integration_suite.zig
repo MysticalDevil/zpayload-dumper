@@ -4,6 +4,22 @@ const app = @import("zpayload");
 const selected_triplet = &app.fixtures.selected_triplet;
 const default_tmp_base = "/tmp";
 
+const TestReporter = struct {
+    out_buf: [64]u8 = undefined,
+    err_buf: [64]u8 = undefined,
+    out_discard: std.Io.Writer.Discarding = undefined,
+    err_discard: std.Io.Writer.Discarding = undefined,
+    reporter: app.payload.Reporter = undefined,
+
+    fn init() TestReporter {
+        var result = TestReporter{};
+        result.out_discard = std.Io.Writer.Discarding.init(&result.out_buf);
+        result.err_discard = std.Io.Writer.Discarding.init(&result.err_buf);
+        result.reporter = app.payload.Reporter.init(&result.out_discard.writer, &result.err_discard.writer, false, false);
+        return result;
+    }
+};
+
 test "integration selected partitions match go baseline" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -15,15 +31,11 @@ test "integration selected partitions match go baseline" {
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
-    var out_buf: [64]u8 = undefined;
-    var err_buf: [64]u8 = undefined;
-    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
-    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter_holder = TestReporter.init();
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, selected_triplet, 2, &ui);
+    try p.extractSelected(out_dir, selected_triplet, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
     defer allocator.free(boot_out);
@@ -48,16 +60,12 @@ test "extract selected writes only requested partition" {
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
-    var out_buf: [64]u8 = undefined;
-    var err_buf: [64]u8 = undefined;
-    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
-    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter_holder = TestReporter.init();
 
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, &.{"vendor_boot"}, 2, &ui);
+    try p.extractSelected(out_dir, &.{"vendor_boot"}, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     const vendor_boot_out = try std.fmt.allocPrint(allocator, "{s}/vendor_boot.img", .{out_dir});
     defer allocator.free(vendor_boot_out);
@@ -90,16 +98,12 @@ test "extract selected unknown partition produces no files" {
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
-    var out_buf: [64]u8 = undefined;
-    var err_buf: [64]u8 = undefined;
-    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
-    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter_holder = TestReporter.init();
 
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, &.{"not_exist_partition"}, 2, &ui);
+    try p.extractSelected(out_dir, &.{"not_exist_partition"}, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     try std.testing.expectEqual(@as(usize, 0), try app.fs_hash.countFilesInDir(allocator, io, out_dir));
 }
@@ -130,16 +134,12 @@ test "invalid magic payload returns InvalidMagic" {
 test "invalid concurrency returns InvalidConcurrency" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
-    var out_buf: [64]u8 = undefined;
-    var err_buf: [64]u8 = undefined;
-    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
-    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter_holder = TestReporter.init();
 
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try std.testing.expectError(error.InvalidConcurrency, p.extractAll(".zig-cache", 0, &ui));
+    try std.testing.expectError(error.InvalidConcurrency, p.extractAll(".zig-cache", 0, &reporter_holder.reporter, app.payload.Sink.noop));
 }
 
 test "zip input extraction path matches sample baseline" {
@@ -150,7 +150,7 @@ test "zip input extraction path matches sample baseline" {
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
     const tmp_base = default_tmp_base;
-    var extracted = try app.zip_payload.extractPayloadBinFromZip(allocator, io, tmp_base, zip_path);
+    const extracted = try app.zip_payload.extractPayloadBinFromZip(allocator, io, tmp_base, zip_path);
     defer {
         std.Io.Dir.cwd().deleteTree(io, extracted.temp_dir) catch {};
         allocator.free(extracted.temp_dir);
@@ -164,16 +164,12 @@ test "zip input extraction path matches sample baseline" {
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
-    var out_buf: [64]u8 = undefined;
-    var err_buf: [64]u8 = undefined;
-    var out_discard = std.Io.Writer.Discarding.init(&out_buf);
-    var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter_holder = TestReporter.init();
 
     var p = try app.payload.Payload.open(allocator, io, extracted.payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, selected_triplet, 2, &ui);
+    try p.extractSelected(out_dir, selected_triplet, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
     defer allocator.free(boot_out);

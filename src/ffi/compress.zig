@@ -1,13 +1,9 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
 
-const c = @cImport({
-    @cInclude("bzlib.h");
-    @cInclude("lzma.h");
-    @cInclude("zstd.h");
-});
+const c = @import("compress");
 
-pub const Error = errors.CompressError || errors.SystemError;
+pub const Error = errors.AppError;
 const chunk_size = 128 * 1024;
 
 pub fn copyRawToWriter(

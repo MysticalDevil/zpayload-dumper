@@ -3,7 +3,7 @@
 Zig implementation of Android `payload.bin` dumper.
 
 > [!IMPORTANT]
-> This project currently targets Zig `0.16-dev` (`master`) only.
+> This project currently targets Zig `0.16.0` and the current codebase is organized around Zig 0.16 APIs.
 
 ## Install
 
@@ -67,10 +67,28 @@ Options:
 - `-l`, `--list`: list partitions only
 - `-p`, `--partitions <csv>`: extract selected partitions
 - `-o`, `--output <dir>`: output directory
-- `-c`, `--concurrency <n>`: number of parallel partition workers
+- `-c`, `--concurrency <n>`: number of parallel partition workers, default `4`
+- `--color`: alias for `--color=always`
+- `--color=<mode>`: color mode, one of `auto`, `always`, `never`
+- `--no-color`: alias for `--color=never`
 
 If `-o` is omitted, the default output directory is generated as local time:
 `extracted_YYYYMMDD_HHMMSS`.
+
+Color precedence:
+
+- command-line flags
+- `ZPAYLOAD_COLOR`
+- `CLICOLOR_FORCE`, `NO_COLOR`, `CLICOLOR`
+- automatic `isTTY` detection
+
+Environment variables:
+
+- `ZPAYLOAD_COLOR=auto|always|never`
+- `NO_COLOR`
+- `CLICOLOR=0`
+- `CLICOLOR_FORCE=1`
+- `TMPDIR`
 
 Examples:
 
@@ -84,6 +102,7 @@ Progress:
 
 - TTY: dynamic multi-partition progress view
 - non-TTY: concise line-based logs
+- color auto mode is resolved per output stream using `isTTY`
 
 ## Test And Bench
 

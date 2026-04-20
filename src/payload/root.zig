@@ -1,16 +1,15 @@
 const std = @import("std");
-const errors = @import("errors.zig");
-const upb = @import("ffi/upb.zig");
-const compress = @import("ffi/compress.zig");
-const ui_mod = @import("command_line_ui.zig");
-const header = @import("payload/header.zig");
-const progress = @import("payload/progress.zig");
-const extent_writer = @import("payload/extent_writer.zig");
+const errors = @import("../errors.zig");
+const upb = @import("../ffi/upb.zig");
+const compress = @import("../ffi/compress.zig");
+const header = @import("header.zig");
+const progress = @import("progress.zig");
+const extent_writer = @import("extent_writer.zig");
 
 pub const block_size: u64 = 4096;
-pub const Error = errors.PayloadError || errors.DecodeError || errors.CompressError || errors.SystemError;
-pub const Ui = ui_mod.Ui;
-pub const ColorMode = ui_mod.ColorMode;
+pub const Error = errors.AppError;
+pub const Reporter = progress.Reporter;
+pub const Sink = progress.Sink;
 
 pub const Payload = struct {
     allocator: std.mem.Allocator,
@@ -49,16 +48,16 @@ pub const Payload = struct {
         self.data_offset = self.metadata_size + self.header.metadata_signature_len;
     }
 
-    pub fn printPartitionList(self: *Payload, w: *std.Io.Writer) Error!void {
+    pub fn printPartitionList(self: *Payload, writer: *std.Io.Writer) Error!void {
         const ctx = self.ctx orelse return error.ManifestNotInitialized;
-        w.writeAll("Found partitions:\n") catch return error.IoFailure;
-        const n = ctx.partitionCount();
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            const name = ctx.partitionName(i) orelse continue;
-            w.print("  {s} (", .{name}) catch return error.IoFailure;
-            printSizeKbMb(w, ctx.partitionSize(i)) catch return error.IoFailure;
-            w.writeAll(")\n") catch return error.IoFailure;
+        writer.writeAll("Found partitions:\n") catch return error.IoFailure;
+        const count = ctx.partitionCount();
+        var index: usize = 0;
+        while (index < count) : (index += 1) {
+            const name = ctx.partitionName(index) orelse continue;
+            writer.print("  {s} (", .{name}) catch return error.IoFailure;
+            printSizeKbMb(writer, ctx.partitionSize(index)) catch return error.IoFailure;
+            writer.writeAll(")\n") catch return error.IoFailure;
         }
     }
 
@@ -67,8 +66,14 @@ pub const Payload = struct {
         return ctx.partitionCount();
     }
 
-    pub fn extractAll(self: *Payload, output_dir: []const u8, concurrency: usize, ui: *const ui_mod.Ui) Error!void {
-        return self.extractSelected(output_dir, &.{}, concurrency, ui);
+    pub fn extractAll(
+        self: *Payload,
+        output_dir: []const u8,
+        concurrency: usize,
+        reporter: *const Reporter,
+        sink: progress.Sink,
+    ) Error!void {
+        return self.extractSelected(output_dir, &.{}, concurrency, reporter, sink);
     }
 
     pub fn extractSelected(
@@ -76,7 +81,8 @@ pub const Payload = struct {
         output_dir: []const u8,
         selected: []const []const u8,
         concurrency: usize,
-        ui: *const ui_mod.Ui,
+        reporter: *const Reporter,
+        sink: progress.Sink,
     ) Error!void {
         const ctx = self.ctx orelse return error.ManifestNotInitialized;
         if (concurrency < 1) return error.InvalidConcurrency;
@@ -85,14 +91,14 @@ pub const Payload = struct {
         defer jobs.deinit();
 
         const part_count = ctx.partitionCount();
-        var pidx: usize = 0;
-        while (pidx < part_count) : (pidx += 1) {
-            const name = ctx.partitionName(pidx) orelse continue;
+        var partition_index: usize = 0;
+        while (partition_index < part_count) : (partition_index += 1) {
+            const name = ctx.partitionName(partition_index) orelse continue;
             if (selected.len != 0 and !containsPartition(selected, name)) continue;
             try jobs.append(.{
-                .pidx = pidx,
+                .pidx = partition_index,
                 .name = name,
-                .total_ops = ctx.operationCount(pidx),
+                .total_ops = ctx.operationCount(partition_index),
             });
         }
 
@@ -132,68 +138,81 @@ pub const Payload = struct {
             const now_ns = std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
             const force_refresh = now_ns - last_render_ns >= 250 * std.time.ns_per_ms;
             if (tracker.consumeDirty() or force_refresh) {
-                progress.renderProgress(&tracker, ui, &prev_lines) catch |err| {
+                sink.render(&tracker, reporter, &prev_lines) catch |err| {
                     std.log.warn("failed to render progress: {}", .{err});
                 };
                 last_render_ns = now_ns;
             }
-            _ = self.io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch return error.IoFailure;
+            const sleep_result = self.io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .awake);
+            sleep_result catch return error.IoFailure;
         }
 
         for (threads) |thread| thread.join();
 
-        progress.renderProgress(&tracker, ui, &prev_lines) catch |err| {
+        sink.render(&tracker, reporter, &prev_lines) catch |err| {
             std.log.warn("failed to render final progress: {}", .{err});
         };
 
         if (collector.hasErrors()) {
-            collector.print(ui) catch return error.IoFailure;
+            sink.printErrors(&collector, reporter) catch return error.IoFailure;
             return error.ExtractFailed;
         }
     }
 
-    fn extractPartition(self: *Payload, ctx: upb.Context, pidx: usize, out: std.Io.File, tracker: *progress.ProgressTracker, tracker_idx: usize) Error!void {
+    fn extractPartition(
+        self: *Payload,
+        ctx: upb.Context,
+        partition_index: usize,
+        out: std.Io.File,
+        tracker: *progress.ProgressTracker,
+        tracker_index: usize,
+    ) Error!void {
         var writer_buf: [64 * 1024]u8 = undefined;
-        var fw = out.writer(self.io, &writer_buf);
-        errdefer fw.flush() catch {};
+        var file_writer = out.writer(self.io, &writer_buf);
+        errdefer file_writer.flush() catch {};
 
-        const op_count = ctx.operationCount(pidx);
-        var oidx: usize = 0;
-        while (oidx < op_count) : (oidx += 1) {
-            const extent_count = ctx.dstExtentCount(pidx, oidx);
+        const op_count = ctx.operationCount(partition_index);
+        var operation_index: usize = 0;
+        while (operation_index < op_count) : (operation_index += 1) {
+            const extent_count = ctx.dstExtentCount(partition_index, operation_index);
             if (extent_count == 0) return error.InvalidDstExtents;
 
-            const blob_len_u64 = ctx.operationDataLength(pidx, oidx);
-            const blob_off_u64 = ctx.operationDataOffset(pidx, oidx);
+            const blob_len_u64 = ctx.operationDataLength(partition_index, operation_index);
+            const blob_off_u64 = ctx.operationDataOffset(partition_index, operation_index);
             const blob_abs = std.math.add(u64, self.data_offset, blob_off_u64) catch return error.IntegerOverflow;
-            const expected_uncompressed = try extent_writer.sumExtentBytes(ctx, pidx, oidx, extent_count);
-            const op_type = ctx.operationType(pidx, oidx) orelse return error.UnhandledOperationType;
-            var cursor = extent_writer.ExtentCursor.init(ctx, pidx, oidx, extent_count, expected_uncompressed, &fw);
+            const expected_uncompressed = try extent_writer.sumExtentBytes(ctx, partition_index, operation_index, extent_count);
+            const op_type = ctx.operationType(partition_index, operation_index) orelse return error.UnhandledOperationType;
+            var cursor = extent_writer.ExtentCursor.init(ctx, partition_index, operation_index, extent_count, expected_uncompressed, &file_writer);
             var hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
             switch (op_type) {
                 .replace => {
-                    _ = try compress.copyRawToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.copyRawToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    std.debug.assert(bytes_written <= blob_len_u64);
                 },
                 .replace_xz => {
-                    _ = try compress.decompressXzToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.decompressXzToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    std.debug.assert(bytes_written <= expected_uncompressed);
                 },
                 .replace_bz => {
-                    _ = try compress.decompressBz2ToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.decompressBz2ToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    std.debug.assert(bytes_written <= expected_uncompressed);
                 },
                 .zstd => {
-                    _ = try compress.decompressZstdToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.decompressZstdToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    std.debug.assert(bytes_written <= expected_uncompressed);
                 },
                 .zero => {
                     var hash_buf: [1024 * 1024]u8 = undefined;
                     var remaining = blob_len_u64;
-                    var pos = blob_abs;
+                    var position = blob_abs;
                     while (remaining > 0) {
-                        const n: usize = @intCast(@min(remaining, hash_buf.len));
-                        _ = self.file.readPositionalAll(self.io, hash_buf[0..n], pos) catch return error.IoFailure;
-                        hasher.update(hash_buf[0..n]);
-                        remaining -= n;
-                        pos += n;
+                        const chunk_len: usize = @intCast(@min(remaining, hash_buf.len));
+                        const read_count = self.file.readPositionalAll(self.io, hash_buf[0..chunk_len], position) catch return error.IoFailure;
+                        std.debug.assert(read_count == chunk_len);
+                        hasher.update(hash_buf[0..chunk_len]);
+                        remaining -= chunk_len;
+                        position += chunk_len;
                     }
                     try extent_writer.writeZeroToExtents(self.allocator, &cursor);
                 },
@@ -201,18 +220,18 @@ pub const Payload = struct {
             }
             try cursor.finish();
 
-            if (ctx.operationSha256(pidx, oidx)) |expected| {
+            if (ctx.operationSha256(partition_index, operation_index)) |expected| {
                 var hash: [32]u8 = undefined;
                 hasher.final(&hash);
                 if (!std.mem.eql(u8, expected, hash[0..])) return error.ChecksumMismatch;
             }
-            tracker.updateOps(tracker_idx, oidx + 1);
+            tracker.updateOps(tracker_index, operation_index + 1);
         }
-        fw.flush() catch return error.IoFailure;
+        file_writer.flush() catch return error.IoFailure;
     }
 };
 
-fn printSizeKbMb(w: *std.Io.Writer, size_bytes: u64) !void {
+fn printSizeKbMb(writer: *std.Io.Writer, size_bytes: u64) !void {
     const kb: u64 = 1024;
     const mb: u64 = 1024 * 1024;
 
@@ -220,7 +239,7 @@ fn printSizeKbMb(w: *std.Io.Writer, size_bytes: u64) !void {
         const scaled = @divFloor(size_bytes * 100 + mb / 2, mb);
         const whole = @divFloor(scaled, 100);
         const frac = @mod(scaled, 100);
-        try w.print("{d}.{d:0>2} MB", .{ whole, frac });
+        try writer.print("{d}.{d:0>2} MB", .{ whole, frac });
         return;
     }
 
@@ -228,10 +247,10 @@ fn printSizeKbMb(w: *std.Io.Writer, size_bytes: u64) !void {
     const whole = @divFloor(scaled, 10);
     const frac = @mod(scaled, 10);
     if (frac == 0) {
-        try w.print("{d} KB", .{whole});
+        try writer.print("{d} KB", .{whole});
         return;
     }
-    try w.print("{d}.{d} KB", .{ whole, frac });
+    try writer.print("{d}.{d} KB", .{ whole, frac });
 }
 
 const WorkerShared = struct {
@@ -247,38 +266,52 @@ const WorkerShared = struct {
 
 fn workerMain(shared: *WorkerShared) void {
     while (true) {
-        const idx = shared.next_job.fetchAdd(1, .monotonic);
-        if (idx >= shared.jobs.len) break;
+        const index = shared.next_job.fetchAdd(1, .monotonic);
+        if (index >= shared.jobs.len) break;
 
-        const job = shared.jobs[idx];
-        shared.tracker.markRunning(idx);
+        const job = shared.jobs[index];
+        shared.tracker.markRunning(index);
 
         const out_path = std.fmt.allocPrint(shared.payload.allocator, "{s}/{s}.img", .{ shared.output_dir, job.name }) catch {
-            shared.collector.add("failed to allocate output path for partition {s}", .{job.name});
-            shared.tracker.markFailed(idx);
-            _ = shared.completed_jobs.fetchAdd(1, .release);
+            const message = std.fmt.allocPrint(shared.payload.allocator, "failed to allocate output path for partition {s}", .{job.name}) catch null;
+            if (message) |owned| {
+                shared.collector.addOwned(owned);
+            }
+            shared.tracker.markFailed(index);
+            incrementCompleted(shared.completed_jobs, shared.jobs.len);
             continue;
         };
         defer shared.payload.allocator.free(out_path);
 
         var out = std.Io.Dir.cwd().createFile(shared.payload.io, out_path, .{ .truncate = true }) catch |err| {
-            shared.collector.add("failed to open output for partition {s}: {s}", .{ job.name, @errorName(err) });
-            shared.tracker.markFailed(idx);
-            _ = shared.completed_jobs.fetchAdd(1, .release);
+            const message = std.fmt.allocPrint(shared.payload.allocator, "failed to open output for partition {s}: {s}", .{ job.name, @errorName(err) }) catch null;
+            if (message) |owned| {
+                shared.collector.addOwned(owned);
+            }
+            shared.tracker.markFailed(index);
+            incrementCompleted(shared.completed_jobs, shared.jobs.len);
             continue;
         };
         defer out.close(shared.payload.io);
 
-        shared.payload.extractPartition(shared.ctx, job.pidx, out, shared.tracker, idx) catch |err| {
-            shared.collector.add("failed to extract partition {s}: {s}", .{ job.name, @errorName(err) });
-            shared.tracker.markFailed(idx);
-            _ = shared.completed_jobs.fetchAdd(1, .release);
+        shared.payload.extractPartition(shared.ctx, job.pidx, out, shared.tracker, index) catch |err| {
+            const message = std.fmt.allocPrint(shared.payload.allocator, "failed to extract partition {s}: {s}", .{ job.name, @errorName(err) }) catch null;
+            if (message) |owned| {
+                shared.collector.addOwned(owned);
+            }
+            shared.tracker.markFailed(index);
+            incrementCompleted(shared.completed_jobs, shared.jobs.len);
             continue;
         };
 
-        shared.tracker.markDone(idx);
-        _ = shared.completed_jobs.fetchAdd(1, .release);
+        shared.tracker.markDone(index);
+        incrementCompleted(shared.completed_jobs, shared.jobs.len);
     }
+}
+
+fn incrementCompleted(completed_jobs: *std.atomic.Value(usize), max_jobs: usize) void {
+    const previous_completed = completed_jobs.fetchAdd(1, .release);
+    std.debug.assert(previous_completed < max_jobs);
 }
 
 fn containsPartition(parts: []const []const u8, name: []const u8) bool {

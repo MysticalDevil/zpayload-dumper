@@ -1,13 +1,10 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const c = @cImport({
-    @cInclude("time.h");
-});
+const c = @import("time");
 
 const Error = errors.AppError;
 
-pub fn makeDefaultOutputDirectory(allocator: std.mem.Allocator, io: std.Io) Error![]u8 {
-    _ = io;
+pub fn makeDefaultOutputDirectory(allocator: std.mem.Allocator) Error![]u8 {
     var now = c.time(null);
     if (now < 0) return error.TimeUnavailable;
     var tm_buf: c.struct_tm = undefined;
