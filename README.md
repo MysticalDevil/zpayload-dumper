@@ -1,5 +1,7 @@
 # zpayload-dumper
 
+[![Zig](https://img.shields.io/badge/Zig-0.16.0-orange.svg)](https://ziglang.org)
+
 Zig implementation of Android `payload.bin` dumper.
 
 > [!IMPORTANT]

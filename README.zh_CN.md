@@ -1,5 +1,7 @@
 # zpayload-dumper
 
+[![Zig](https://img.shields.io/badge/Zig-0.16.0-orange.svg)](https://ziglang.org)
+
 从 Android OTA 更新包中提取分区镜像的命令行工具
 
 Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数据打包成一个特殊的 `payload.bin` 文件，放在 zip 包里面。这个工具可以读取 `payload.bin`，并把里面每个分区的镜像（比如 `boot.img`、`vbmeta.img`、`system.img` 等）单独提取出来。
