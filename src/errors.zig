@@ -21,6 +21,7 @@ pub const AppError = error{
     Bzip2DecompressFailed,
     ZstdDecompressFailed,
     IoFailure,
+    InsufficientDiskSpace,
     OutOfMemory,
 };
 
@@ -47,6 +48,7 @@ pub const Code = enum {
     bzip2_decompress_failed,
     zstd_decompress_failed,
     io_failure,
+    insufficient_disk_space,
     out_of_memory,
 };
 
@@ -87,6 +89,7 @@ pub fn code(err: AppError) Code {
         error.Bzip2DecompressFailed => .bzip2_decompress_failed,
         error.ZstdDecompressFailed => .zstd_decompress_failed,
         error.IoFailure => .io_failure,
+        error.InsufficientDiskSpace => .insufficient_disk_space,
         error.OutOfMemory => .out_of_memory,
     };
 }
@@ -113,6 +116,7 @@ pub fn detail(err: AppError) Detail {
         error.Bzip2DecompressFailed => .{ .code = .bzip2_decompress_failed, .domain = .compression, .stable_name = "bzip2_decompress_failed" },
         error.ZstdDecompressFailed => .{ .code = .zstd_decompress_failed, .domain = .compression, .stable_name = "zstd_decompress_failed" },
         error.IoFailure => .{ .code = .io_failure, .domain = .system, .stable_name = "io_failure" },
+        error.InsufficientDiskSpace => .{ .code = .insufficient_disk_space, .domain = .system, .stable_name = "insufficient_disk_space" },
         error.OutOfMemory => .{ .code = .out_of_memory, .domain = .system, .stable_name = "out_of_memory" },
     };
 }

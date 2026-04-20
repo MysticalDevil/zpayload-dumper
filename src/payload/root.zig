@@ -160,7 +160,12 @@ pub const Payload = struct {
             std.log.warn("failed to render final progress: {}", .{err});
         };
 
-        if (engine_err) |err| return err;
+        if (engine_err) |err| {
+            if (collector.hasErrors()) {
+                sink.print_errors_fn(&collector, reporter) catch {};
+            }
+            return err;
+        }
 
         if (collector.hasErrors()) {
             sink.print_errors_fn(&collector, reporter) catch return error.IoFailure;
