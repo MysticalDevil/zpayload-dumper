@@ -88,6 +88,10 @@ zig build
 
 # 也可以直接处理 zip 格式的 OTA 包
 ./zig-out/bin/zpayload-dumper payload.zip
+
+# 模拟提取（不实际写入，用于测试进度 UI）
+./zig-out/bin/zpayload-dumper --dry-run -p boot,vendor payload.bin
+./zig-out/bin/zpayload-dumper --dry-run payload.zip
 ```
 
 ### 选项
@@ -98,6 +102,7 @@ zig build
 | `-p`, `--partitions <csv>` | 只提取指定的分区（用逗号分隔） |
 | `-o`, `--output <dir>` | 输出目录（默认：`extracted_YYYYMMDD_HHMMSS`） |
 | `-c`, `--concurrency <n>` | 并行工作线程数（默认：4） |
+| `--dry-run` | 模拟提取进度，不实际写入输出（用于测试进度 UI 或验证 payload 可解析性） |
 | `--color` | 等价于 `--color=always` |
 | `--color=<mode>` | 颜色模式：`auto`、`always`、`never` |
 | `--no-color` | 等价于 `--color=never` |
@@ -171,12 +176,45 @@ zig build bench_smoke -- /path/to/payload.bin
 zig build bench_pressure -- /path/to/payload.bin
 ```
 
+### 与 payload-dumper-go 的性能对比
+
+以下数据均为 wall-clock 时间（hyperfine 5 次取均值）。
+
+**测试机器：** AMD Ryzen 7 4800H（8 核 / 16 线程），22 GB DDR4，
+ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
+
+测试样本是一个 **78 MB** 的合成 payload
+（`scripts/generate_sample_payload.py --total-mb 128`），
+覆盖了 `REPLACE`、`REPLACE_XZ`、`REPLACE_BZ`、`ZSTD` 和 `ZERO` 五种操作类型。
+
+| 场景 | 并发数 | zpayload-dumper | payload-dumper-go | 加速比 |
+|------|--------|-----------------|-------------------|--------|
+| `payload.bin` | 1 线程 | **264 ms** | 1 386 ms | **5.3 倍** |
+| `payload.bin` | 4 线程 | **275 ms** | 442 ms | **1.6 倍** |
+| `payload.bin` | 8 线程 | **267 ms** | 304 ms | **1.1 倍** |
+| `ota_update.zip` | 4 线程 | **382 ms** | 514 ms | **1.3 倍** |
+
+内存占用（bench128，c=4）：zpayload-dumper 峰值 RSS 约 115 MB，payload-dumper-go 约 56 MB。
+
+说明：
+
+- **单线程**：Zig 实现明显更快（约 5 倍），主要得益于零分配解压路径和直接的 `std.Io` 流式写入。
+- **多线程**：随着并发数增加，SSD I/O 逐渐成为主要瓶颈，差距缩小。8 线程时两者相差约 15 %。
+- **Zip 输入**：两者都增加了约 100 ms 的解压开销，zpayload-dumper 始终保持领先。
+
+> 完整的 benchmark 矩阵（bench32/128/256/512、并发扩展性分析、瓶颈拆解）
+> 见 [`docs/COMPARISON.md`](docs/COMPARISON.md)。
+
 ### 生成测试数据
 
-用于本地测试或持续集成，可以生成一个小型的合成 payload 和对应的预期输出：
+用于本地测试或持续集成，可以生成合成 payload 和对应的预期输出：
 
 ```bash
+# 小型样本（默认，约 56 KB payload）
 python3 scripts/generate_sample_payload.py --name smoke1
+
+# 大型样本，用于性能测试（约 80 MB payload，128 MB 原始数据）
+python3 scripts/generate_sample_payload.py --name bench128 --total-mb 128
 ```
 
 输出会放到 `tests/data/`（该目录被 git 忽略），然后可以验证：
