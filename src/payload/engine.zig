@@ -559,7 +559,8 @@ fn flushPending(shared: *Shared, part: *PartitionWriteState) void {
         const op = part.job.operations[chunk.op_index];
 
         part.pending_mutex.unlock(shared.io);
-        const success = writeOpData(shared.io, part.output_file, &writer_buf, op, switch (chunk.data) {
+        const is_spill = chunk.data == .tmp_file;
+        const data: []const u8 = switch (chunk.data) {
             .memory => |mem| mem,
             .tmp_file => |path| readSpillFile(shared, path) catch |err| {
                 shared.allocator.free(path);
@@ -567,7 +568,9 @@ fn flushPending(shared: *Shared, part: *PartitionWriteState) void {
                 part.pending_mutex.lockUncancelable(shared.io);
                 return;
             },
-        }) catch |err| {
+        };
+        defer if (is_spill) shared.allocator.free(data);
+        const success = writeOpData(shared.io, part.output_file, &writer_buf, op, data) catch |err| {
             cleanupPendingData(shared.io, shared.allocator, shared.budget, &chunk);
             recordError(shared, part, chunk.op_index, err);
             part.pending_mutex.lockUncancelable(shared.io);
