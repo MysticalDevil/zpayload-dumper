@@ -36,7 +36,7 @@ test "stress full extraction baseline sample" {
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractAll(out_dir, 4, &reporter);
+    try p.extractAll(out_dir, 4, &reporter, app.payload.Sink.noop);
     const elapsed_ns = std.Io.Timestamp.now(io, .real).toNanoseconds() - start;
     try std.testing.expect(elapsed_ns > 0);
 
@@ -66,7 +66,7 @@ test "stress selected triplet concurrency matrix is stable" {
             var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
             defer p.deinit();
             try p.init();
-            try p.extractSelected(out_dir, selected_triplet, c, &reporter);
+            try p.extractSelected(out_dir, selected_triplet, c, &reporter, app.payload.Sink.noop);
 
             const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
             defer allocator.free(boot_out);
@@ -103,7 +103,7 @@ test "stress full extraction repeats keep file count and hashes" {
         var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
         defer p.deinit();
         try p.init();
-        try p.extractAll(out_dir, 4, &reporter);
+        try p.extractAll(out_dir, 4, &reporter, app.payload.Sink.noop);
 
         try std.testing.expectEqual(@as(usize, 24), try app.fs_hash.countFilesInDir(allocator, io, out_dir));
         try assertKeyBaselines(allocator, io, out_dir);

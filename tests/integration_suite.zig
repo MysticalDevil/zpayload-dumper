@@ -35,7 +35,7 @@ test "integration selected partitions match go baseline" {
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, selected_triplet, 2, &reporter_holder.reporter);
+    try p.extractSelected(out_dir, selected_triplet, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
     defer allocator.free(boot_out);
@@ -65,7 +65,7 @@ test "extract selected writes only requested partition" {
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, &.{"vendor_boot"}, 2, &reporter_holder.reporter);
+    try p.extractSelected(out_dir, &.{"vendor_boot"}, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     const vendor_boot_out = try std.fmt.allocPrint(allocator, "{s}/vendor_boot.img", .{out_dir});
     defer allocator.free(vendor_boot_out);
@@ -103,7 +103,7 @@ test "extract selected unknown partition produces no files" {
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, &.{"not_exist_partition"}, 2, &reporter_holder.reporter);
+    try p.extractSelected(out_dir, &.{"not_exist_partition"}, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     try std.testing.expectEqual(@as(usize, 0), try app.fs_hash.countFilesInDir(allocator, io, out_dir));
 }
@@ -139,7 +139,7 @@ test "invalid concurrency returns InvalidConcurrency" {
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try std.testing.expectError(error.InvalidConcurrency, p.extractAll(".zig-cache", 0, &reporter_holder.reporter));
+    try std.testing.expectError(error.InvalidConcurrency, p.extractAll(".zig-cache", 0, &reporter_holder.reporter, app.payload.Sink.noop));
 }
 
 test "zip input extraction path matches sample baseline" {
@@ -169,7 +169,7 @@ test "zip input extraction path matches sample baseline" {
     var p = try app.payload.Payload.open(allocator, io, extracted.payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, selected_triplet, 2, &reporter_holder.reporter);
+    try p.extractSelected(out_dir, selected_triplet, 2, &reporter_holder.reporter, app.payload.Sink.noop);
 
     const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
     defer allocator.free(boot_out);

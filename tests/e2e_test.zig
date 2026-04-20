@@ -32,7 +32,7 @@ pub fn main(init: std.process.Init) !void {
     var p = try app.payload.Payload.open(gpa, io, payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractAll(output_dir, 4, &reporter);
+    try p.extractAll(output_dir, 4, &reporter, app.payload.Sink.noop);
 
     try app.fs_hash.compareDirs(gpa, io, baseline_dir, output_dir);
     try out.interface.writeAll("[OK] e2e check passed\n");

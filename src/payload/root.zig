@@ -9,6 +9,7 @@ const extent_writer = @import("extent_writer.zig");
 pub const block_size: u64 = 4096;
 pub const Error = errors.AppError;
 pub const Reporter = progress.Reporter;
+pub const Sink = progress.Sink;
 
 pub const Payload = struct {
     allocator: std.mem.Allocator,
@@ -65,8 +66,14 @@ pub const Payload = struct {
         return ctx.partitionCount();
     }
 
-    pub fn extractAll(self: *Payload, output_dir: []const u8, concurrency: usize, reporter: *const Reporter) Error!void {
-        return self.extractSelected(output_dir, &.{}, concurrency, reporter);
+    pub fn extractAll(
+        self: *Payload,
+        output_dir: []const u8,
+        concurrency: usize,
+        reporter: *const Reporter,
+        sink: progress.Sink,
+    ) Error!void {
+        return self.extractSelected(output_dir, &.{}, concurrency, reporter, sink);
     }
 
     pub fn extractSelected(
@@ -75,6 +82,7 @@ pub const Payload = struct {
         selected: []const []const u8,
         concurrency: usize,
         reporter: *const Reporter,
+        sink: progress.Sink,
     ) Error!void {
         const ctx = self.ctx orelse return error.ManifestNotInitialized;
         if (concurrency < 1) return error.InvalidConcurrency;
@@ -130,7 +138,7 @@ pub const Payload = struct {
             const now_ns = std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
             const force_refresh = now_ns - last_render_ns >= 250 * std.time.ns_per_ms;
             if (tracker.consumeDirty() or force_refresh) {
-                progress.renderProgress(&tracker, reporter, &prev_lines) catch |err| {
+                sink.render(&tracker, reporter, &prev_lines) catch |err| {
                     std.log.warn("failed to render progress: {}", .{err});
                 };
                 last_render_ns = now_ns;
@@ -141,12 +149,12 @@ pub const Payload = struct {
 
         for (threads) |thread| thread.join();
 
-        progress.renderProgress(&tracker, reporter, &prev_lines) catch |err| {
+        sink.render(&tracker, reporter, &prev_lines) catch |err| {
             std.log.warn("failed to render final progress: {}", .{err});
         };
 
         if (collector.hasErrors()) {
-            try collector.print(reporter);
+            sink.printErrors(&collector, reporter) catch return error.IoFailure;
             return error.ExtractFailed;
         }
     }
