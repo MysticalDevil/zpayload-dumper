@@ -23,7 +23,7 @@ const DryRunTask = struct {
 pub const Payload = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
-    file: std.Io.File,
+    file: ?std.Io.File = null,
     header: header.Header = .{},
     metadata_size: u64 = 0,
     data_offset: u64 = 0,
@@ -40,19 +40,31 @@ pub const Payload = struct {
 
     pub fn deinit(self: *Payload) void {
         if (self.ctx) |*ctx| ctx.deinit();
-        self.file.close(self.io);
+        if (self.file) |file| file.close(self.io);
     }
 
     pub fn init(self: *Payload) Error!void {
-        self.header = try header.readHeader(self.file, self.io);
+        const file = self.file orelse return error.IoFailure;
+        self.header = try header.readHeader(file, self.io);
 
-        const manifest_buf = try header.readAtAlloc(self.allocator, self.file, self.io, 24, self.header.manifest_len);
+        const manifest_buf = try header.readAtAlloc(self.allocator, file, self.io, 24, self.header.manifest_len);
         defer self.allocator.free(manifest_buf);
         const signature_off = 24 + self.header.manifest_len;
-        const signature_buf = try header.readAtAlloc(self.allocator, self.file, self.io, signature_off, self.header.metadata_signature_len);
+        const signature_buf = try header.readAtAlloc(self.allocator, file, self.io, signature_off, self.header.metadata_signature_len);
         defer self.allocator.free(signature_buf);
 
         self.ctx = try upb.Context.init(manifest_buf, signature_buf);
+        self.metadata_size = 24 + self.header.manifest_len;
+        self.data_offset = self.metadata_size + self.header.metadata_signature_len;
+    }
+
+    pub fn initFromMetadata(self: *Payload, manifest: []const u8, signature: []const u8) Error!void {
+        self.header = .{
+            .version = 2,
+            .manifest_len = manifest.len,
+            .metadata_signature_len = signature.len,
+        };
+        self.ctx = try upb.Context.init(manifest, signature);
         self.metadata_size = 24 + self.header.manifest_len;
         self.data_offset = self.metadata_size + self.header.metadata_signature_len;
     }
@@ -138,7 +150,11 @@ pub const Payload = struct {
                 e.* = if (engine.run(
                     payload.allocator,
                     payload.io,
-                    payload.file,
+                    payload.file orelse {
+                        e.* = error.IoFailure;
+                        done.store(true, .release);
+                        return;
+                    },
                     payload.data_offset,
                     plan_ptr,
                     out_dir,
