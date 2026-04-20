@@ -1,7 +1,7 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
 const upb = @import("../ffi/upb.zig");
-const compress = @import("../ffi/compress.zig");
+const compress = @import("../compress/root.zig");
 const progress = @import("progress.zig");
 const extent_writer = @import("extent_writer.zig");
 const extract_plan = @import("extract_plan.zig");
@@ -440,21 +440,13 @@ fn workerMain(shared: *Shared) void {
         var al_writer = ArrayListWriter.init(&buffer);
         var hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
-        const write_result: Error!void = blk: {
-            switch (op.op_type) {
-                .replace => {
-                    _ = compress.copyRawToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf) catch |err| break :blk err;
-                },
-                .replace_xz => {
-                    _ = compress.decompressXzToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf, &compress_out_buf) catch |err| break :blk err;
-                },
-                .replace_bz => {
-                    _ = compress.decompressBz2ToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf, &compress_out_buf) catch |err| break :blk err;
-                },
-                .zstd => {
-                    _ = compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf, &compress_out_buf) catch |err| break :blk err;
-                },
-                .zero => {
+        const write_result: Error!usize = blk: {
+            const n = switch (op.op_type) {
+                .replace => compress.copyRawToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf) catch |err| break :blk err,
+                .replace_xz => compress.decompressXzToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, shared.allocator) catch |err| break :blk err,
+                .replace_bz => compress.decompressBz2ToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf, &compress_out_buf) catch |err| break :blk err,
+                .zstd => compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, shared.allocator) catch |err| break :blk err,
+                .zero => blk_zero: {
                     var remaining = op.blob_length;
                     var position = op.blob_offset;
                     while (remaining > 0) {
@@ -467,9 +459,10 @@ fn workerMain(shared: *Shared) void {
                     }
                     buffer.resize(op.expected_uncompressed) catch break :blk error.OutOfMemory;
                     @memset(buffer.items, 0);
+                    break :blk_zero op.expected_uncompressed;
                 },
                 else => break :blk error.UnhandledOperationType,
-            }
+            };
 
             // Verify SHA-256
             if (op.sha256) |expected| {
@@ -477,6 +470,8 @@ fn workerMain(shared: *Shared) void {
                 hasher.final(&hash);
                 if (!std.mem.eql(u8, expected, &hash)) break :blk error.ChecksumMismatch;
             }
+
+            break :blk n;
         };
 
         if (write_result) |_| {} else |err| {

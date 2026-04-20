@@ -93,49 +93,27 @@ pub fn decompressZstdToWriter(
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
     writer: *std.Io.Writer,
-    in_buf: []u8,
-    out_buf: []u8,
+    allocator: std.mem.Allocator,
 ) Error!usize {
+    const data = allocator.alloc(u8, compressed_len) catch return error.OutOfMemory;
+    defer allocator.free(data);
 
-    const dstream = c.ZSTD_createDStream() orelse return error.ZstdDecompressFailed;
-    defer _ = c.ZSTD_freeDStream(dstream);
+    const read_count = file.readPositionalAll(io, data, offset) catch return error.IoFailure;
+    std.debug.assert(read_count == compressed_len);
+    hasher.update(data);
 
-    if (c.ZSTD_isError(c.ZSTD_initDStream(dstream)) != 0) return error.ZstdDecompressFailed;
+    var fixed_reader = std.Io.Reader.fixed(data);
+    var decompress = std.compress.zstd.Decompress.init(&fixed_reader, &.{}, .{});
 
-    var remaining = compressed_len;
-    var pos = offset;
-    var total_written: usize = 0;
-
-    while (remaining > 0) {
-        const n: usize = @intCast(@min(remaining, in_buf.len));
-        const read_count = file.readPositionalAll(io, in_buf[0..n], pos) catch return error.IoFailure;
-        std.debug.assert(read_count == n);
-        hasher.update(in_buf[0..n]);
-        pos += n;
-        remaining -= n;
-
-        var zin = c.ZSTD_inBuffer{
-            .src = in_buf[0..n].ptr,
-            .size = n,
-            .pos = 0,
+    var total: usize = 0;
+    while (true) {
+        const n = decompress.reader.stream(writer, .unlimited) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return error.ZstdDecompressFailed,
         };
-        while (zin.pos < zin.size) {
-            var zout = c.ZSTD_outBuffer{
-                .dst = out_buf[0..].ptr,
-                .size = out_buf.len,
-                .pos = 0,
-            };
-            if (c.ZSTD_isError(c.ZSTD_decompressStream(dstream, &zout, &zin)) != 0) {
-                return error.ZstdDecompressFailed;
-            }
-            if (zout.pos > 0) {
-                writer.writeAll(out_buf[0..zout.pos]) catch return error.IoFailure;
-                total_written += zout.pos;
-            }
-        }
+        total += n;
     }
-
-    return total_written;
+    return total;
 }
 
 pub fn decompressXzToWriter(
@@ -145,48 +123,26 @@ pub fn decompressXzToWriter(
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
     writer: *std.Io.Writer,
-    in_buf: []u8,
-    out_buf: []u8,
+    allocator: std.mem.Allocator,
 ) Error!usize {
+    const data = allocator.alloc(u8, compressed_len) catch return error.OutOfMemory;
+    defer allocator.free(data);
 
-    var stream: c.lzma_stream = std.mem.zeroes(c.lzma_stream);
-    const init_rc = c.lzma_stream_decoder(&stream, std.math.maxInt(u64), 0);
-    if (init_rc != c.LZMA_OK) return error.XzDecompressFailed;
-    defer _ = c.lzma_end(&stream);
+    const read_count = file.readPositionalAll(io, data, offset) catch return error.IoFailure;
+    std.debug.assert(read_count == compressed_len);
+    hasher.update(data);
 
-    var remaining = compressed_len;
-    var pos = offset;
-    var total_written: usize = 0;
+    var fixed_reader = std.Io.Reader.fixed(data);
+    var decompress = std.compress.xz.Decompress.init(&fixed_reader, allocator, &.{}) catch return error.XzDecompressFailed;
+    defer decompress.deinit();
 
+    var total: usize = 0;
     while (true) {
-        const read_n: usize = if (remaining == 0) 0 else @intCast(@min(remaining, in_buf.len));
-        if (read_n > 0) {
-            const read_count = file.readPositionalAll(io, in_buf[0..read_n], pos) catch return error.IoFailure;
-            std.debug.assert(read_count == read_n);
-            hasher.update(in_buf[0..read_n]);
-            pos += read_n;
-            remaining -= read_n;
-        }
-
-        stream.next_in = if (read_n > 0) in_buf[0..read_n].ptr else null;
-        stream.avail_in = read_n;
-
-        while (true) {
-            stream.next_out = out_buf[0..].ptr;
-            stream.avail_out = @intCast(out_buf.len);
-            const action: c.lzma_action = if (remaining == 0 and stream.avail_in == 0) c.LZMA_FINISH else c.LZMA_RUN;
-            const rc = c.lzma_code(&stream, action);
-
-            const produced = out_buf.len - stream.avail_out;
-            if (produced > 0) {
-                writer.writeAll(out_buf[0..produced]) catch return error.IoFailure;
-                total_written += produced;
-            }
-            if (rc == c.LZMA_STREAM_END) return total_written;
-            if (rc != c.LZMA_OK) return error.XzDecompressFailed;
-            if (stream.avail_in == 0 and produced == 0) break;
-        }
-
-        if (remaining == 0 and read_n == 0) return error.XzDecompressFailed;
+        const n = decompress.reader.stream(writer, .unlimited) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return error.XzDecompressFailed,
+        };
+        total += n;
     }
+    return total;
 }
