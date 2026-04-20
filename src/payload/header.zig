@@ -1,7 +1,7 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
 
-pub const Error = errors.PayloadError || errors.SystemError;
+pub const Error = errors.AppError;
 
 pub const Header = struct {
     version: u64 = 0,

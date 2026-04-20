@@ -3,7 +3,7 @@ const errors = @import("../errors.zig");
 const upb = @import("../ffi/upb.zig");
 
 pub const block_size: u64 = 4096;
-pub const Error = errors.PayloadError || errors.SystemError;
+pub const Error = errors.AppError;
 
 pub fn bytesForBlocks(num_blocks: u64) Error!u64 {
     return std.math.mul(u64, num_blocks, block_size) catch return error.IntegerOverflow;
