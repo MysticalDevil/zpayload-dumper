@@ -99,7 +99,7 @@ pub fn run(
     }
 
     // --- Phase 2: Start worker threads for parallel decompression ---
-    const worker_count = @max(concurrency, 2);
+    const worker_count = @max(concurrency, std.Thread.getCpuCount() catch 4);
     const threads = try allocator.alloc(std.Thread, worker_count);
     defer allocator.free(threads);
 
