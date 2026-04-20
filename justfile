@@ -22,5 +22,8 @@ bench_smoke:
 bench_pressure:
     zig build bench_pressure
 
+release version:
+    ./scripts/release.sh {{version}}
+
 clean:
-    rm -rf .zig-cache zig-out tests/data/generated
+    rm -rf .zig-cache zig-out tests/data/generated release
