@@ -53,6 +53,10 @@ pub fn parseArgs(
                 options.list = true;
                 continue;
             }
+            if (std.mem.eql(u8, arg, "--dry-run")) {
+                options.dry_run = true;
+                continue;
+            }
             if (std.mem.startsWith(u8, arg, "--partitions=")) {
                 try replaceOwned(allocator, &options.partitions, arg["--partitions=".len..]);
                 continue;
@@ -173,4 +177,29 @@ fn parseColorMode(text: []const u8) ?types.ColorMode {
 fn replaceOwned(allocator: std.mem.Allocator, slot: *?[]u8, value: []const u8) !void {
     if (slot.*) |old| allocator.free(old);
     slot.* = try allocator.dupe(u8, value);
+}
+
+test "parseArgs enables dry-run mode" {
+    const allocator = std.testing.allocator;
+    const args = [_][]const u8{
+        "zpayload-dumper",
+        "--dry-run",
+        "-p",
+        "boot,vendor",
+        "payload.bin",
+    };
+
+    const result = try parseArgs(allocator, .{}, &args);
+    switch (result) {
+        .help => try std.testing.expect(false),
+        .run => |options| {
+            defer {
+                var owned = options;
+                owned.deinit();
+            }
+            try std.testing.expect(options.dry_run);
+            try std.testing.expect(options.partitions != null);
+            try std.testing.expectEqualStrings("payload.bin", options.input);
+        },
+    }
 }

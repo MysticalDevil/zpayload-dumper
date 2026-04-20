@@ -11,6 +11,15 @@ pub const Error = errors.AppError;
 pub const Reporter = progress.Reporter;
 pub const Sink = progress.Sink;
 
+const DryRunTask = struct {
+    tracker: *progress.ProgressTracker,
+    jobs: []const progress.Job,
+    next_job: *std.atomic.Value(usize),
+    completed_jobs: *std.atomic.Value(usize),
+    worker_failed: *std.atomic.Value(bool),
+    io: std.Io,
+};
+
 pub const Payload = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -172,7 +181,118 @@ pub const Payload = struct {
             return error.ExtractFailed;
         }
     }
+
+    pub fn extractSelectedDryRun(
+        self: *Payload,
+        selected: []const []const u8,
+        concurrency: usize,
+        reporter: *const Reporter,
+        sink: progress.Sink,
+    ) Error!void {
+        const ctx = self.ctx orelse return error.ManifestNotInitialized;
+        if (concurrency < 1) return error.InvalidConcurrency;
+
+        var plan = try extract_plan.buildPlan(self.allocator, ctx, self.data_offset, selected);
+        defer plan.deinit();
+
+        if (plan.jobs.len == 0) return;
+
+        var jobs = std.array_list.Managed(progress.Job).init(self.allocator);
+        defer jobs.deinit();
+        for (plan.jobs) |job| {
+            try jobs.append(.{
+                .pidx = job.pidx,
+                .name = job.name,
+                .total_ops = job.total_operations,
+            });
+        }
+
+        var tracker = try progress.ProgressTracker.init(self.allocator, self.io, jobs.items);
+        defer tracker.deinit(self.allocator);
+
+        var prev_lines: usize = 0;
+        var last_render_ns: i96 = 0;
+
+        const worker_count = @min(concurrency, plan.jobs.len);
+        const threads = try self.allocator.alloc(std.Thread, worker_count);
+        defer self.allocator.free(threads);
+
+        var next_job = std.atomic.Value(usize).init(0);
+        var completed_jobs = std.atomic.Value(usize).init(0);
+        var worker_failed = std.atomic.Value(bool).init(false);
+
+        for (0..worker_count) |idx| {
+            threads[idx] = std.Thread.spawn(.{}, dryRunWorker, .{DryRunTask{
+                .tracker = &tracker,
+                .jobs = jobs.items,
+                .next_job = &next_job,
+                .completed_jobs = &completed_jobs,
+                .worker_failed = &worker_failed,
+                .io = self.io,
+            }}) catch return error.IoFailure;
+        }
+
+        while (completed_jobs.load(.acquire) < jobs.items.len) {
+            const now_ns = std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
+            const force_refresh = now_ns - last_render_ns >= 250 * std.time.ns_per_ms;
+            if (tracker.consumeDirty() or force_refresh) {
+                sink.render_fn(&tracker, reporter, &prev_lines) catch |err| {
+                    std.log.warn("failed to render dry-run progress: {}", .{err});
+                };
+                last_render_ns = now_ns;
+            }
+
+            self.io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch return error.IoFailure;
+        }
+
+        for (threads) |thread| thread.join();
+
+        sink.render_fn(&tracker, reporter, &prev_lines) catch |err| {
+            std.log.warn("failed to render final dry-run progress: {}", .{err});
+        };
+
+        if (worker_failed.load(.acquire)) return error.IoFailure;
+    }
 };
+
+fn dryRunWorker(task: DryRunTask) void {
+    const base_delay_ms: u64 = 20;
+    const jitter_ms: u64 = 10;
+
+    while (true) {
+        const idx = task.next_job.fetchAdd(1, .acq_rel);
+        if (idx >= task.jobs.len) break;
+
+        const job = task.jobs[idx];
+        task.tracker.markRunning(idx);
+        if (job.total_ops == 0) {
+            task.tracker.markDone(idx);
+            const completed_after_zero = task.completed_jobs.fetchAdd(1, .acq_rel) + 1;
+            std.debug.assert(completed_after_zero <= task.jobs.len);
+            continue;
+        }
+
+        var job_failed = false;
+        var step: usize = 0;
+        while (step < job.total_ops) : (step += 1) {
+            const sleep_ms = base_delay_ms + @as(u64, @intCast((idx + step) % (jitter_ms + 1)));
+            task.io.sleep(.fromNanoseconds(sleep_ms * std.time.ns_per_ms), .awake) catch {
+                task.tracker.markFailed(idx);
+                task.worker_failed.store(true, .release);
+                const completed_after_failure = task.completed_jobs.fetchAdd(1, .acq_rel) + 1;
+                std.debug.assert(completed_after_failure <= task.jobs.len);
+                job_failed = true;
+                break;
+            };
+            task.tracker.updateOps(idx, step + 1);
+        }
+
+        if (job_failed) continue;
+        task.tracker.markDone(idx);
+        const completed_after_job = task.completed_jobs.fetchAdd(1, .acq_rel) + 1;
+        std.debug.assert(completed_after_job <= task.jobs.len);
+    }
+}
 
 fn printSizeKbMb(writer: *std.Io.Writer, size_bytes: u64) !void {
     const kb: u64 = 1024;

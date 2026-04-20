@@ -29,6 +29,7 @@ pub const ResolvedColors = struct {
 pub const CliOptions = struct {
     allocator: std.mem.Allocator,
     list: bool = false,
+    dry_run: bool = false,
     partitions: ?[]u8 = null,
     output: ?[]u8 = null,
     concurrency: i32 = 4,

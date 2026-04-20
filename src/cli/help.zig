@@ -62,6 +62,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try writer.writeByte('\n');
     try writeOptionLine(writer, theme, Layout.section_indent, "-h, --help", "", "Show this help", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-l, --list", "", "Show partition list only", null, null);
+    try writeOptionLine(writer, theme, Layout.section_indent, "--dry-run", "", "Simulate extraction progress without writing output", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-p, --partitions", " <csv>", "Extract selected partitions", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-o, --output", " <dir>", "Output directory", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-c, --concurrency", " <n>", "Number of parallel partition workers", " (default: ", "4");
@@ -82,6 +83,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try theme.write(writer, .section, "Examples");
     try writer.writeByte('\n');
     try writeExampleLine(writer, theme, "zpayload-dumper -l /path/to/payload.bin");
+    try writeExampleLine(writer, theme, "zpayload-dumper --dry-run -p boot,vendor /path/to/payload.bin");
     try writeExampleLine(writer, theme, "zpayload-dumper -p boot,vendor -o out /path/to/payload.bin");
     try writeExampleLine(writer, theme, "zpayload-dumper --color=always /path/to/ota.zip");
     try writeExampleLine(writer, theme, "ZPAYLOAD_COLOR=never zpayload-dumper /path/to/payload.bin");

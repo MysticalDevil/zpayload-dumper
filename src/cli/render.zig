@@ -15,7 +15,8 @@ pub fn renderProgress(tracker: *progress.ProgressTracker, reporter: *const progr
     if (!reporter.dynamic) return;
 
     const out = reporter.out;
-    render_style.moveCursorUp(out, prev_lines.*) catch return error.IoFailure;
+    const previous_rendered_lines = prev_lines.*;
+    render_style.moveCursorUp(out, previous_rendered_lines) catch return error.IoFailure;
 
     tracker.mutex.lockUncancelable(tracker.io);
     defer tracker.mutex.unlock(tracker.io);
@@ -69,8 +70,15 @@ pub fn renderProgress(tracker: *progress.ProgressTracker, reporter: *const progr
     }
 
     var cleared_lines = rendered_lines;
-    while (cleared_lines < prev_lines.*) : (cleared_lines += 1) {
+    while (cleared_lines < previous_rendered_lines) : (cleared_lines += 1) {
         out.writeAll("\x1b[2K\r\n") catch return error.IoFailure;
+    }
+
+    // After clearing stale rows, move back to the live block bottom so the next
+    // refresh only needs to travel over the currently visible lines.
+    const lines_to_rewind = previous_rendered_lines -| rendered_lines;
+    if (lines_to_rewind != 0) {
+        render_style.moveCursorUp(out, lines_to_rewind) catch return error.IoFailure;
     }
 
     prev_lines.* = rendered_lines;
@@ -84,4 +92,40 @@ pub fn printErrors(collector: *progress.ErrorCollector, reporter: *const progres
         reporter.fail(msg) catch return error.IoFailure;
     }
     if (collector.dropped) reporter.fail("some worker errors could not be recorded due to allocation failure") catch return error.IoFailure;
+}
+
+test "renderProgress moves cursor back after shrinking active rows" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const jobs = [_]progress.Job{
+        .{ .pidx = 0, .name = "boot", .total_ops = 2 },
+        .{ .pidx = 1, .name = "product", .total_ops = 2 },
+    };
+
+    var tracker = try progress.ProgressTracker.init(allocator, io, &jobs);
+    defer tracker.deinit(allocator);
+
+    var out_capture = std.Io.Writer.Allocating.init(allocator);
+    defer out_capture.deinit();
+    var err_capture = std.Io.Writer.Allocating.init(allocator);
+    defer err_capture.deinit();
+
+    const reporter = progress.Reporter.init(&out_capture.writer, &err_capture.writer, false, true);
+    var prev_lines: usize = 0;
+
+    tracker.markRunning(0);
+    tracker.markRunning(1);
+    try renderProgress(&tracker, &reporter, &prev_lines);
+
+    tracker.markDone(0);
+    try renderProgress(&tracker, &reporter, &prev_lines);
+
+    const rendered = out_capture.writer.buffer[0..out_capture.writer.end];
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        rendered,
+        1,
+        "\x1b[2K\r\n\x1b[1A",
+    ));
 }

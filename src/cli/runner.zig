@@ -71,8 +71,12 @@ pub fn run(
         owned_output = generated;
         break :blk generated;
     };
-    std.Io.Dir.cwd().createDirPath(io, out_path) catch return error.IoFailure;
-    try logPath(ui, "output dir: {s}", out_path);
+    if (options.dry_run) {
+        try logPath(ui, "output dir (dry-run): {s}", out_path);
+    } else {
+        std.Io.Dir.cwd().createDirPath(io, out_path) catch return error.IoFailure;
+        try logPath(ui, "output dir: {s}", out_path);
+    }
 
     {
         var workers_buffer: [96]u8 = undefined;
@@ -87,16 +91,29 @@ pub fn run(
 
         {
             var select_buffer: [256]u8 = undefined;
-            const select_message = std.fmt.bufPrint(&select_buffer, "extracting selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
+            const select_message = blk: {
+                if (options.dry_run) {
+                    break :blk std.fmt.bufPrint(&select_buffer, "dry-run simulating selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
+                }
+                break :blk std.fmt.bufPrint(&select_buffer, "extracting selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
+            };
             ui.info(select_message) catch return error.IoFailure;
         }
-        try dumper.extractSelected(out_path, selected.items, @intCast(options.concurrency), reporter, render.sink);
+        if (options.dry_run) {
+            try dumper.extractSelectedDryRun(selected.items, @intCast(options.concurrency), reporter, render.sink);
+        } else {
+            try dumper.extractSelected(out_path, selected.items, @intCast(options.concurrency), reporter, render.sink);
+        }
     } else {
-        ui.info("extracting all partitions") catch return error.IoFailure;
-        try dumper.extractSelected(out_path, &.{}, @intCast(options.concurrency), reporter, render.sink);
+        ui.info(if (options.dry_run) "dry-run simulating all partitions" else "extracting all partitions") catch return error.IoFailure;
+        if (options.dry_run) {
+            try dumper.extractSelectedDryRun(&.{}, @intCast(options.concurrency), reporter, render.sink);
+        } else {
+            try dumper.extractSelected(out_path, &.{}, @intCast(options.concurrency), reporter, render.sink);
+        }
     }
 
-    ui.success("extraction complete") catch return error.IoFailure;
+    ui.success(if (options.dry_run) "dry-run complete" else "extraction complete") catch return error.IoFailure;
 }
 
 fn splitPartitions(list: *std.array_list.Managed([]const u8), csv: []const u8) !void {
