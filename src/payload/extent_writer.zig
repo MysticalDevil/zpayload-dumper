@@ -5,6 +5,13 @@ const upb = @import("../ffi/upb.zig");
 pub const block_size: u64 = 4096;
 pub const Error = errors.AppError;
 
+pub const Extent = struct {
+    start_block: u64,
+    num_blocks: u64,
+    offset_bytes: u64,
+    length_bytes: u64,
+};
+
 pub fn bytesForBlocks(num_blocks: u64) Error!u64 {
     return std.math.mul(u64, num_blocks, block_size) catch return error.IntegerOverflow;
 }
@@ -20,10 +27,7 @@ pub fn sumExtentBytes(ctx: upb.Context, pidx: usize, oidx: usize, extent_count: 
 }
 
 pub const ExtentCursor = struct {
-    ctx: upb.Context,
-    pidx: usize,
-    oidx: usize,
-    extent_count: usize,
+    extents: []const Extent,
     fw: *std.Io.File.Writer,
     extent_idx: usize = 0,
     extent_written: u64 = 0,
@@ -31,34 +35,28 @@ pub const ExtentCursor = struct {
     expected_total: u64 = 0,
 
     pub fn init(
-        ctx: upb.Context,
-        pidx: usize,
-        oidx: usize,
-        extent_count: usize,
-        expected_total: usize,
+        extents: []const Extent,
+        expected_total: u64,
         fw: *std.Io.File.Writer,
     ) ExtentCursor {
         return .{
-            .ctx = ctx,
-            .pidx = pidx,
-            .oidx = oidx,
-            .extent_count = extent_count,
+            .extents = extents,
             .fw = fw,
-            .expected_total = @intCast(expected_total),
+            .expected_total = expected_total,
         };
     }
 
-    fn currentExtentLen(self: ExtentCursor) Error!u64 {
-        return bytesForBlocks(self.ctx.dstExtentNumBlocks(self.pidx, self.oidx, self.extent_idx));
+    fn currentExtentLen(self: ExtentCursor) u64 {
+        return self.extents[self.extent_idx].length_bytes;
     }
 
     pub fn writeAll(self: *ExtentCursor, data: []const u8) Error!void {
         var pos: usize = 0;
         while (pos < data.len) {
-            if (self.extent_idx >= self.extent_count) return error.UnexpectedBytesWritten;
+            if (self.extent_idx >= self.extents.len) return error.UnexpectedBytesWritten;
 
-            const extent_off = try bytesForBlocks(self.ctx.dstExtentStartBlock(self.pidx, self.oidx, self.extent_idx));
-            const extent_len = try self.currentExtentLen();
+            const extent = self.extents[self.extent_idx];
+            const extent_len = extent.length_bytes;
             if (self.extent_written >= extent_len) {
                 self.extent_idx += 1;
                 self.extent_written = 0;
@@ -67,7 +65,7 @@ pub const ExtentCursor = struct {
 
             const remain: usize = @intCast(extent_len - self.extent_written);
             const n = @min(remain, data.len - pos);
-            const write_off = std.math.add(u64, extent_off, self.extent_written) catch return error.IntegerOverflow;
+            const write_off = std.math.add(u64, extent.offset_bytes, self.extent_written) catch return error.IntegerOverflow;
             self.fw.seekTo(write_off) catch return error.IoFailure;
             self.fw.interface.writeAll(data[pos .. pos + n]) catch return error.IoFailure;
             pos += n;
@@ -82,11 +80,11 @@ pub const ExtentCursor = struct {
 
     pub fn finish(self: *ExtentCursor) Error!void {
         if (self.total_written != self.expected_total) return error.UnexpectedBytesWritten;
-        if (self.extent_idx < self.extent_count) {
+        if (self.extent_idx < self.extents.len) {
             var idx = self.extent_idx;
             if (self.extent_written != 0) return error.UnexpectedBytesWritten;
-            while (idx < self.extent_count) : (idx += 1) {
-                if (self.ctx.dstExtentNumBlocks(self.pidx, self.oidx, idx) != 0) return error.UnexpectedBytesWritten;
+            while (idx < self.extents.len) : (idx += 1) {
+                if (self.extents[idx].num_blocks != 0) return error.UnexpectedBytesWritten;
             }
         }
     }
@@ -139,17 +137,13 @@ pub const WriterAdapter = struct {
 };
 
 pub fn writeZeroToExtents(
-    allocator: std.mem.Allocator,
     cursor: *ExtentCursor,
+    zero_buf: []const u8,
 ) Error!void {
-    const chunk = try allocator.alloc(u8, 1024 * 1024);
-    defer allocator.free(chunk);
-    @memset(chunk, 0);
-
     var remaining = cursor.expected_total;
     while (remaining > 0) {
-        const n: usize = @intCast(@min(remaining, chunk.len));
-        try cursor.writeAll(chunk[0..n]);
+        const n: usize = @intCast(@min(remaining, zero_buf.len));
+        try cursor.writeAll(zero_buf[0..n]);
         remaining -= n;
     }
 }

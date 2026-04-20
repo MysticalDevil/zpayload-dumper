@@ -4,7 +4,7 @@ const errors = @import("../errors.zig");
 const c = @import("compress");
 
 pub const Error = errors.AppError;
-const chunk_size = 128 * 1024;
+pub const chunk_size = 128 * 1024;
 
 pub fn copyRawToWriter(
     file: std.Io.File,
@@ -13,8 +13,8 @@ pub fn copyRawToWriter(
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
     writer: *std.Io.Writer,
+    in_buf: []u8,
 ) Error!usize {
-    var in_buf: [chunk_size]u8 = undefined;
     var remaining = compressed_len;
     var pos = offset;
     var total_written: usize = 0;
@@ -39,9 +39,9 @@ pub fn decompressBz2ToWriter(
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
     writer: *std.Io.Writer,
+    in_buf: []u8,
+    out_buf: []u8,
 ) Error!usize {
-    var in_buf: [chunk_size]u8 = undefined;
-    var out_buf: [chunk_size]u8 = undefined;
 
     var stream: c.bz_stream = std.mem.zeroes(c.bz_stream);
     if (c.BZ2_bzDecompressInit(&stream, 0, 0) != c.BZ_OK) return error.Bzip2DecompressFailed;
@@ -66,8 +66,8 @@ pub fn decompressBz2ToWriter(
 
         stream.next_in = if (in_pos < in_len) @ptrCast(&in_buf[in_pos]) else null;
         stream.avail_in = @intCast(in_len - in_pos);
-        stream.next_out = @ptrCast(&out_buf);
-        stream.avail_out = out_buf.len;
+        stream.next_out = @ptrCast(out_buf.ptr);
+        stream.avail_out = @intCast(out_buf.len);
 
         const rc = c.BZ2_bzDecompress(&stream);
         const consumed = (in_len - in_pos) - @as(usize, @intCast(stream.avail_in));
@@ -93,9 +93,9 @@ pub fn decompressZstdToWriter(
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
     writer: *std.Io.Writer,
+    in_buf: []u8,
+    out_buf: []u8,
 ) Error!usize {
-    var in_buf: [chunk_size]u8 = undefined;
-    var out_buf: [chunk_size]u8 = undefined;
 
     const dstream = c.ZSTD_createDStream() orelse return error.ZstdDecompressFailed;
     defer _ = c.ZSTD_freeDStream(dstream);
@@ -145,9 +145,9 @@ pub fn decompressXzToWriter(
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
     writer: *std.Io.Writer,
+    in_buf: []u8,
+    out_buf: []u8,
 ) Error!usize {
-    var in_buf: [chunk_size]u8 = undefined;
-    var out_buf: [chunk_size]u8 = undefined;
 
     var stream: c.lzma_stream = std.mem.zeroes(c.lzma_stream);
     const init_rc = c.lzma_stream_decoder(&stream, std.math.maxInt(u64), 0);
@@ -173,7 +173,7 @@ pub fn decompressXzToWriter(
 
         while (true) {
             stream.next_out = out_buf[0..].ptr;
-            stream.avail_out = out_buf.len;
+            stream.avail_out = @intCast(out_buf.len);
             const action: c.lzma_action = if (remaining == 0 and stream.avail_in == 0) c.LZMA_FINISH else c.LZMA_RUN;
             const rc = c.lzma_code(&stream, action);
 
