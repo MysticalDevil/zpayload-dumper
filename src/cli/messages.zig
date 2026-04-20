@@ -24,6 +24,7 @@ pub fn userMessage(err: Error) []const u8 {
         error.IntegerOverflow => "numeric overflow while parsing payload metadata",
         error.IoFailure => "i/o failure while reading or writing payload data",
         error.OutOfMemory => "out of memory",
+        error.InsufficientDiskSpace => "insufficient disk space in output directory",
         error.Usage => "invalid arguments",
     };
 }
