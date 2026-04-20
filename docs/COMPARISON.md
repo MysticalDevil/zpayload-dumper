@@ -147,48 +147,48 @@ and exercise `REPLACE`, `REPLACE_XZ`, `REPLACE_BZ`, `ZSTD`, and `ZERO` operation
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | 467 ms | **394 ms** | 0.8× |
-| 2 | 266 ms | **190 ms** | 0.7× |
-| 4 | 195 ms | **119 ms** | 0.6× |
-| 8 | 129 ms | **91 ms** | 0.7× |
-| 16 | 110 ms | **93 ms** | 0.8× |
+| 1 | **419 ms** | 443 ms | **1.1×** |
+| 2 | 275 ms | **204 ms** | 0.7× |
+| 4 | 187 ms | **122 ms** | 0.7× |
+| 8 | 114 ms | **96 ms** | 0.8× |
+| 16 | 152 ms | **93 ms** | 0.6× |
 
 #### bench128
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | 1 676 ms | **1 327 ms** | 0.8× |
-| 2 | 935 ms | **737 ms** | 0.8× |
-| 4 | 637 ms | **412 ms** | 0.6× |
-| 8 | 374 ms | **344 ms** | 0.9× |
-| 16 | 351 ms | **331 ms** | 0.9× |
+| 1 | 1 490 ms | **1 372 ms** | 0.9× |
+| 2 | 829 ms | **731 ms** | 0.9× |
+| 4 | 533 ms | **427 ms** | 0.8× |
+| 8 | 363 ms | **311 ms** | 0.9× |
+| 16 | 345 ms | **297 ms** | 0.9× |
 
 #### bench256
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | 3 109 ms | **2 495 ms** | 0.8× |
-| 2 | 1 642 ms | **1 299 ms** | 0.8× |
-| 4 | 1 057 ms | **791 ms** | 0.7× |
-| 8 | 729 ms | **579 ms** | 0.8× |
-| 16 | 621 ms | **538 ms** | 0.9× |
+| 1 | 2 920 ms | **2 543 ms** | 0.9× |
+| 2 | 1 690 ms | **1 334 ms** | 0.8× |
+| 4 | 1 029 ms | **772 ms** | 0.8× |
+| 8 | 719 ms | **556 ms** | 0.8× |
+| 16 | 668 ms | **520 ms** | 0.8× |
 
 #### bench512
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | 6 105 ms | **4 591 ms** | 0.8× |
-| 2 | 3 191 ms | **2 384 ms** | 0.7× |
-| 4 | 1 924 ms | **1 463 ms** | 0.8× |
-| 8 | 1 289 ms | **1 074 ms** | 0.8× |
-| 16 | 1 201 ms | **1 075 ms** | 0.9× |
+| 1 | 6 002 ms | **4 784 ms** | 0.8× |
+| 2 | 3 042 ms | **2 432 ms** | 0.8× |
+| 4 | 1 987 ms | **1 482 ms** | 0.7× |
+| 8 | 1 341 ms | **1 105 ms** | 0.8× |
+| 16 | 1 192 ms | **1 050 ms** | 0.9× |
 
 #### Zip Extraction (bench128, c=4)
 
 | Tool | Time | Speedup |
 |------|------|----------|
-| zpayload-dumper | 665 ms | 0.8× |
-| payload-dumper-go | **508 ms** | **1.3×** |
+| zpayload-dumper | 625 ms | 0.8× |
+| payload-dumper-go | **523 ms** | **1.2×** |
 
 #### Key Observations from Synthetic Benchmarks
 
@@ -196,23 +196,23 @@ and exercise `REPLACE`, `REPLACE_XZ`, `REPLACE_BZ`, `ZSTD`, and `ZERO` operation
    `zpayload-dumper` to respect the configured `--concurrency` value instead of
    widening the worker pool to CPU thread count.
 
-2. **Both tools now scale with concurrency**:
+2. **Both tools scale, but not uniformly**:
 
-   | Payload | zpayload-dumper c=1→c=16 | payload-dumper-go c=1→c=16 |
-   |---------|--------------------------|----------------------------|
-   | bench32 | **4.3×** | **4.2×** |
-   | bench128 | **4.8×** | **4.0×** |
-   | bench256 | **5.0×** | **4.6×** |
-   | bench512 | **5.1×** | **4.3×** |
+   | Payload | zpayload-dumper best observed | payload-dumper-go best observed |
+   |---------|-------------------------------|---------------------------------|
+   | bench32 | **3.7×** (`c=1→c=8`) | **4.7×** (`c=1→c=16`) |
+   | bench128 | **4.3×** (`c=1→c=16`) | **4.6×** (`c=1→c=16`) |
+   | bench256 | **4.4×** (`c=1→c=16`) | **4.9×** (`c=1→c=16`) |
+   | bench512 | **5.0×** (`c=1→c=16`) | **4.6×** (`c=1→c=16`) |
 
-3. **Absolute performance gap remains**: Even after the concurrency fix, the Go
-   implementation remains faster at every rerun point. The gap shrinks at
-   higher concurrency, especially on larger payloads, but does not reverse.
+3. **Current crossover**: Zig only wins `bench32` at `c=1` in the final 5-run
+   matrix. Go is faster at every other measured point, though the gap narrows
+   at higher concurrency on larger payloads.
 
 4. **Current optimization target**: The Zig implementation's remaining overhead
-   is now in the execution engine itself rather than benchmark semantics. The
-   main suspects are per-operation buffer allocation, pending-queue copies,
-   linear pending flush, and spill-file I/O.
+   is still in the execution engine. The refactor improved concurrency behavior,
+   but more work is needed on direct-write fast paths, pending ownership, and
+   spill avoidance to beat the Go implementation end-to-end.
 
 ---
 

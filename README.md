@@ -219,7 +219,7 @@ zig build bench_pressure -- /path/to/payload.bin
 
 ## Benchmark vs payload-dumper-go
 
-All numbers below are wall-clock time (mean of 3 runs, hyperfine).
+All numbers below are wall-clock time (mean of 5 runs, hyperfine).
 
 **Test machine:** AMD Ryzen 7 4800H (8c/16t), 22 GB DDR4, ZHITAI TiPlus7100 1TB NVMe,
 Gentoo Linux (kernel 7.0.0-gentoo-dist).
@@ -230,20 +230,20 @@ The test payload is a **78 MB** synthetic sample
 
 | Scenario | Concurrency | zpayload-dumper | payload-dumper-go | Speed-up |
 |----------|-------------|-----------------|-------------------|----------|
-| `payload.bin` | 1 worker | 1 676 ms | **1 327 ms** | 0.8× |
-| `payload.bin` | 4 workers | 637 ms | **412 ms** | 0.6× |
-| `payload.bin` | 8 workers | 374 ms | **344 ms** | 0.9× |
-| `ota_update.zip` | 4 workers | 665 ms | **508 ms** | 0.8× |
+| `payload.bin` | 1 worker | 1 490 ms | **1 372 ms** | 0.9× |
+| `payload.bin` | 4 workers | 533 ms | **427 ms** | 0.8× |
+| `payload.bin` | 8 workers | 363 ms | **311 ms** | 0.9× |
+| `ota_update.zip` | 4 workers | 625 ms | **523 ms** | 0.8× |
 
 Observations:
 
 - **Corrected concurrency semantics**: These numbers were rerun after fixing
   `--concurrency` to honor the configured worker count instead of implicitly
   widening to CPU thread count.
-- **Scaling**: zpayload-dumper now scales with concurrency, but
-  payload-dumper-go remains faster across the rerun matrix.
+- **Scaling**: zpayload-dumper now scales with concurrency, but the best result
+  still trails payload-dumper-go on the `bench128` sample.
 - **Gap at higher concurrency**: The difference narrows as concurrency rises.
-  On `bench128`, the gap shrinks to roughly 6-9 % at `c=8..16`.
+  On `bench128`, the gap shrinks to roughly 10-17 % at `c=8..16`.
 - **Zip input**: Zip extraction remains slower than raw `payload.bin` for both
   tools, and the Go implementation currently leads there as well.
 
