@@ -67,7 +67,7 @@ pub fn run(
     defer if (owned_output) |dir| gpa.free(dir);
 
     const out_path = if (options.output) |value| value else blk: {
-        const generated = try output.makeDefaultOutputDirectory(gpa);
+        const generated = try output.makeDefaultOutputDirectory(gpa, io);
         owned_output = generated;
         break :blk generated;
     };

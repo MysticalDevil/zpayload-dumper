@@ -45,11 +45,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const translate_time = b.addTranslateC(.{
-        .root_source_file = b.path("src/c/time_header.h"),
-        .target = target,
-        .optimize = optimize,
-    });
 
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -68,7 +63,6 @@ pub fn build(b: *std.Build) void {
 
     root_module.addImport("upb", translate_upb.createModule());
     root_module.addImport("compress", translate_compress.createModule());
-    root_module.addImport("time", translate_time.createModule());
     zpayload_mod.addImport("upb", translate_upb.createModule());
     zpayload_mod.addImport("compress", translate_compress.createModule());
 
