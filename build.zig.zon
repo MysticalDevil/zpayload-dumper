@@ -4,4 +4,10 @@
     .minimum_zig_version = "0.16.0",
     .paths = .{""},
     .fingerprint = 0x1f04bcd32c40d5b6,
+    .dependencies = .{
+        .protobuf = .{
+            .url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v31.1.tar.gz",
+            .hash = "N-V-__8AADIRaAU5OiSbKkWDIuR5kNN2OFI2_1xyxlK9beZc",
+        },
+    },
 }

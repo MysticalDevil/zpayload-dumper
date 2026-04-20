@@ -1,9 +1,10 @@
 const std = @import("std");
 
-fn attachPayloadDeps(b: *std.Build, module: *std.Build.Module, upb_out: std.Build.LazyPath, minitable_out: std.Build.LazyPath) void {
+fn attachPayloadDeps(b: *std.Build, module: *std.Build.Module, upb_out: std.Build.LazyPath, minitable_out: std.Build.LazyPath, utf8_range_dep: *std.Build.Dependency) void {
     module.addIncludePath(upb_out);
     module.addIncludePath(minitable_out);
     module.addIncludePath(b.path("src/c"));
+    module.addIncludePath(utf8_range_dep.path("third_party/utf8_range"));
     module.addCSourceFile(.{
         .file = upb_out.path(b, "update_metadata.upb.c"),
     });
@@ -13,9 +14,11 @@ fn attachPayloadDeps(b: *std.Build, module: *std.Build.Module, upb_out: std.Buil
     module.addCSourceFile(.{
         .file = b.path("src/c/upb_wrap.c"),
     });
+    module.addCSourceFile(.{
+        .file = utf8_range_dep.path("third_party/utf8_range/utf8_range.c"),
+    });
 
     module.linkSystemLibrary("upb", .{});
-    module.linkSystemLibrary("utf8_range", .{});
     module.linkSystemLibrary("lzma", .{});
     module.linkSystemLibrary("bz2", .{});
     module.linkSystemLibrary("zstd", .{});
@@ -52,14 +55,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    attachPayloadDeps(b, root_module, upb_out, minitable_out);
+    const utf8_range_dep = b.dependency("protobuf", .{});
+    attachPayloadDeps(b, root_module, upb_out, minitable_out, utf8_range_dep);
     const zpayload_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    attachPayloadDeps(b, zpayload_mod, upb_out, minitable_out);
+    attachPayloadDeps(b, zpayload_mod, upb_out, minitable_out, utf8_range_dep);
 
     root_module.addImport("upb", translate_upb.createModule());
     root_module.addImport("compress", translate_compress.createModule());
