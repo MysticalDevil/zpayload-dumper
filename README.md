@@ -11,46 +11,89 @@ Zig implementation of Android `payload.bin` dumper.
 
 Prerequisites:
 
-- Zig `master` (tracking 0.16 APIs)
-- `protoc` with `--upb_out` and `--upb_minitable_out`
+- Zig `0.16.0` (install via your distro package manager or [ziglang.org](https://ziglang.org))
+- `protoc` with `--upb_out` and `--upb_minitable_out` plugins
 - System libs: `upb`, `utf8_range`, `lzma`, `bz2`, `zstd`
 
-### Install Dependencies
+### Distro Support
 
-The package names below are checked against official distro package indexes (as of 2026-03-08).
-If your linker still reports missing `upb`/`utf8_range` symbols, install or build those libraries manually.
+| Distro | Package Manager | Status | Notes |
+|--------|----------------|--------|-------|
+| Arch Linux | `pacman` | ✅ Supported | `protobuf` ≥ 34 ships `protoc-gen-upb` |
+| Gentoo | `emerge` | ✅ Supported | `dev-libs/protobuf[upb]` |
+| Ubuntu | `apt` | ❌ Not supported | apt `protobuf-compiler` (3.21) lacks upb plugins |
+| Debian | `apt` | ❌ Not supported | same as Ubuntu |
+| Fedora | `dnf` | ❌ Not supported | dnf `protobuf-compiler` lacks upb plugins |
+| Alpine | `apk` | ⚠️ Known issue | `protoc-gen-upb` present, but Zig/musl static-link order fails |
 
-#### Debian
+> **Why apt/dnf don't work:** The `protoc-gen-upb` and `protoc-gen-upb_minitable` plugins are only
+> included in protobuf 30+. Ubuntu 24.04, Debian 12 and Fedora 41 still ship protobuf 3.21.x,
+> whose `protoc` cannot generate upb C code.
 
-```bash
-sudo apt update
-sudo apt install -y protobuf-compiler liblzma-dev libbz2-dev libzstd-dev libupb-dev libgrpc-dev
-```
-
-`libgrpc-dev` is included because it provides `libupb.so` in Debian package contents.
-
-#### Fedora
-
-```bash
-sudo dnf install -y protobuf-compiler xz-devel bzip2-devel libzstd-devel grpc-devel
-```
+### Install Dependencies (Arch / Gentoo)
 
 #### Arch Linux
 
 ```bash
-sudo pacman -S --needed protobuf xz bzip2 zstd grpc
+sudo pacman -S --needed protobuf xz bzip2 zstd
 ```
-
-Arch `grpc` package provides `libupb.so`; `upb`/`utf8_range` are not exposed as separate official packages.
 
 #### Gentoo
 
 ```bash
-sudo emerge --ask dev-libs/protobuf app-arch/xz-utils app-arch/bzip2 app-arch/zstd net-libs/grpc
+sudo emerge --ask dev-libs/protobuf app-arch/xz-utils app-arch/bzip2 app-arch/zstd
 ```
 
-Gentoo `dev-libs/protobuf` includes `libupb` USE support; if your profile/package config does not
-provide linkable `upb`/`utf8_range`, install/build them manually before `zig build`.
+### Building protobuf from source (Ubuntu / Debian / Fedora)
+
+If your distro does not provide a recent enough `protoc` with upb plugins, build protobuf from source:
+
+```bash
+# 1. Install build dependencies
+# Ubuntu/Debian:
+sudo apt install -y cmake g++ git liblzma-dev libbz2-dev libzstd-dev
+# Fedora:
+sudo dnf install -y cmake gcc-c++ git xz-devel bzip2-devel libzstd-devel
+
+# 2. Build & install protobuf (includes protoc + libupb + upb generators)
+git clone https://github.com/protocolbuffers/protobuf.git
+cd protobuf
+git checkout v34.1   # or newer
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -Dprotobuf_BUILD_TESTS=OFF \
+  -Dprotobuf_BUILD_SHARED_LIBS=ON \
+  -Dprotobuf_BUILD_UPB=ON
+cmake --build build -j$(nproc)
+sudo cmake --install build
+
+# 3. Build zpayload-dumper
+cd /path/to/zpayload-dumper
+zig build
+```
+
+### Alpine Linux known issue
+
+Alpine's `protobuf` package (31.1+) includes `protoc-gen-upb`, but `upb` is provided only as a
+static archive (`libupb.a`). Zig's linker on musl targets places static libraries before object
+files, causing undefined-symbol errors for `upb_Arena_Free`, `upb_Decode`, etc. There is currently
+no straightforward workaround; use a glibc-based distro (Arch, Gentoo, Ubuntu/Debian/Fedora with
+source-built protobuf) instead.
+
+### Docker build (any OS)
+
+If your distro is not supported, use the provided Docker image:
+
+```bash
+docker compose run --rm builder
+```
+
+Or with plain Docker:
+
+```bash
+docker build -t zpayload-builder .
+docker run --rm -v .:/src zpayload-builder
+```
 
 ## Build
 

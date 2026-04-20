@@ -1,0 +1,13 @@
+.git
+.gitignore
+payload.bin
+extracted_*
+cheetah_*.zip
+zig-cache
+.zig-cache
+zig-out
+zig-pkg
+docker
+*.log
+tmp
+.DS_Store
