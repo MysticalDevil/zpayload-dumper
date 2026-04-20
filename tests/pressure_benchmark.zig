@@ -48,7 +48,9 @@ fn runScenario(
 ) !void {
     const out_dir = try benchOutputDir(gpa, io, scenario_name, c);
     defer gpa.free(out_dir);
-    defer std.Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+    defer std.Io.Dir.cwd().deleteTree(io, out_dir) catch |cleanup_err| {
+        std.debug.panic("failed to cleanup benchmark dir '{s}': {}", .{ out_dir, cleanup_err });
+    };
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
     var out_buf: [64]u8 = undefined;

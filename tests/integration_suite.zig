@@ -152,7 +152,9 @@ test "zip input extraction path matches sample baseline" {
     const tmp_base = default_tmp_base;
     const extracted = try app.zip_payload.extractPayloadBinFromZip(allocator, io, tmp_base, zip_path);
     defer {
-        std.Io.Dir.cwd().deleteTree(io, extracted.temp_dir) catch {};
+        std.Io.Dir.cwd().deleteTree(io, extracted.temp_dir) catch |cleanup_err| {
+            std.debug.panic("failed to cleanup temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });
+        };
         allocator.free(extracted.temp_dir);
         allocator.free(extracted.payload_path);
     }

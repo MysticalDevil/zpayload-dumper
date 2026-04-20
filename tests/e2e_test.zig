@@ -14,7 +14,9 @@ pub fn main(init: std.process.Init) !void {
     io.random(std.mem.asBytes(&nonce));
     const output_dir = try std.fmt.allocPrint(gpa, ".zig-cache/e2e_out_{d}", .{nonce});
     defer gpa.free(output_dir);
-    defer std.Io.Dir.cwd().deleteTree(io, output_dir) catch {};
+    defer std.Io.Dir.cwd().deleteTree(io, output_dir) catch |cleanup_err| {
+        std.debug.panic("failed to cleanup output dir '{s}': {}", .{ output_dir, cleanup_err });
+    };
     try std.Io.Dir.cwd().createDirPath(io, output_dir);
 
     var out_file = std.Io.File.stdout();
