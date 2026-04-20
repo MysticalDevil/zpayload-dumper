@@ -138,7 +138,7 @@ pub const Payload = struct {
             const now_ns = std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
             const force_refresh = now_ns - last_render_ns >= 250 * std.time.ns_per_ms;
             if (tracker.consumeDirty() or force_refresh) {
-                sink.render(&tracker, reporter, &prev_lines) catch |err| {
+                sink.render_fn(&tracker, reporter, &prev_lines) catch |err| {
                     std.log.warn("failed to render progress: {}", .{err});
                 };
                 last_render_ns = now_ns;
@@ -149,12 +149,12 @@ pub const Payload = struct {
 
         for (threads) |thread| thread.join();
 
-        sink.render(&tracker, reporter, &prev_lines) catch |err| {
+        sink.render_fn(&tracker, reporter, &prev_lines) catch |err| {
             std.log.warn("failed to render final progress: {}", .{err});
         };
 
         if (collector.hasErrors()) {
-            sink.printErrors(&collector, reporter) catch return error.IoFailure;
+            sink.print_errors_fn(&collector, reporter) catch return error.IoFailure;
             return error.ExtractFailed;
         }
     }
@@ -169,7 +169,9 @@ pub const Payload = struct {
     ) Error!void {
         var writer_buf: [64 * 1024]u8 = undefined;
         var file_writer = out.writer(self.io, &writer_buf);
-        errdefer file_writer.flush() catch {};
+        errdefer file_writer.flush() catch |flush_err| {
+            std.log.warn("failed to flush output writer during error cleanup: {}", .{flush_err});
+        };
 
         const op_count = ctx.operationCount(partition_index);
         var operation_index: usize = 0;
@@ -183,23 +185,24 @@ pub const Payload = struct {
             const expected_uncompressed = try extent_writer.sumExtentBytes(ctx, partition_index, operation_index, extent_count);
             const op_type = ctx.operationType(partition_index, operation_index) orelse return error.UnhandledOperationType;
             var cursor = extent_writer.ExtentCursor.init(ctx, partition_index, operation_index, extent_count, expected_uncompressed, &file_writer);
+            var writer_adapter = cursor.writer();
             var hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
             switch (op_type) {
                 .replace => {
-                    const bytes_written = try compress.copyRawToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.copyRawToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &writer_adapter.writer);
                     std.debug.assert(bytes_written <= blob_len_u64);
                 },
                 .replace_xz => {
-                    const bytes_written = try compress.decompressXzToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.decompressXzToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &writer_adapter.writer);
                     std.debug.assert(bytes_written <= expected_uncompressed);
                 },
                 .replace_bz => {
-                    const bytes_written = try compress.decompressBz2ToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.decompressBz2ToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &writer_adapter.writer);
                     std.debug.assert(bytes_written <= expected_uncompressed);
                 },
                 .zstd => {
-                    const bytes_written = try compress.decompressZstdToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &cursor);
+                    const bytes_written = try compress.decompressZstdToWriter(self.file, self.io, blob_abs, blob_len_u64, &hasher, &writer_adapter.writer);
                     std.debug.assert(bytes_written <= expected_uncompressed);
                 },
                 .zero => {

@@ -12,7 +12,7 @@ pub fn copyRawToWriter(
     offset: u64,
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) Error!usize {
     var in_buf: [chunk_size]u8 = undefined;
     var remaining = compressed_len;
@@ -21,7 +21,8 @@ pub fn copyRawToWriter(
 
     while (remaining > 0) {
         const n: usize = @intCast(@min(remaining, in_buf.len));
-        _ = file.readPositionalAll(io, in_buf[0..n], pos) catch return error.IoFailure;
+        const read_count = file.readPositionalAll(io, in_buf[0..n], pos) catch return error.IoFailure;
+        std.debug.assert(read_count == n);
         hasher.update(in_buf[0..n]);
         writer.writeAll(in_buf[0..n]) catch return error.IoFailure;
         total_written += n;
@@ -37,7 +38,7 @@ pub fn decompressBz2ToWriter(
     offset: u64,
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) Error!usize {
     var in_buf: [chunk_size]u8 = undefined;
     var out_buf: [chunk_size]u8 = undefined;
@@ -55,7 +56,8 @@ pub fn decompressBz2ToWriter(
     while (true) {
         if (in_pos == in_len and remaining > 0) {
             in_len = @intCast(@min(remaining, in_buf.len));
-            _ = file.readPositionalAll(io, in_buf[0..in_len], pos) catch return error.IoFailure;
+            const read_count = file.readPositionalAll(io, in_buf[0..in_len], pos) catch return error.IoFailure;
+            std.debug.assert(read_count == in_len);
             hasher.update(in_buf[0..in_len]);
             pos += in_len;
             remaining -= in_len;
@@ -90,7 +92,7 @@ pub fn decompressZstdToWriter(
     offset: u64,
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) Error!usize {
     var in_buf: [chunk_size]u8 = undefined;
     var out_buf: [chunk_size]u8 = undefined;
@@ -106,7 +108,8 @@ pub fn decompressZstdToWriter(
 
     while (remaining > 0) {
         const n: usize = @intCast(@min(remaining, in_buf.len));
-        _ = file.readPositionalAll(io, in_buf[0..n], pos) catch return error.IoFailure;
+        const read_count = file.readPositionalAll(io, in_buf[0..n], pos) catch return error.IoFailure;
+        std.debug.assert(read_count == n);
         hasher.update(in_buf[0..n]);
         pos += n;
         remaining -= n;
@@ -141,7 +144,7 @@ pub fn decompressXzToWriter(
     offset: u64,
     compressed_len: u64,
     hasher: *std.crypto.hash.sha2.Sha256,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) Error!usize {
     var in_buf: [chunk_size]u8 = undefined;
     var out_buf: [chunk_size]u8 = undefined;
@@ -158,7 +161,8 @@ pub fn decompressXzToWriter(
     while (true) {
         const read_n: usize = if (remaining == 0) 0 else @intCast(@min(remaining, in_buf.len));
         if (read_n > 0) {
-            _ = file.readPositionalAll(io, in_buf[0..read_n], pos) catch return error.IoFailure;
+            const read_count = file.readPositionalAll(io, in_buf[0..read_n], pos) catch return error.IoFailure;
+            std.debug.assert(read_count == read_n);
             hasher.update(in_buf[0..read_n]);
             pos += read_n;
             remaining -= read_n;

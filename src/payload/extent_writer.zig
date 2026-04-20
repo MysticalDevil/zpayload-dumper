@@ -90,6 +90,52 @@ pub const ExtentCursor = struct {
             }
         }
     }
+
+    pub fn writer(self: *ExtentCursor) WriterAdapter {
+        return WriterAdapter.init(self);
+    }
+};
+
+pub const WriterAdapter = struct {
+    cursor: *ExtentCursor,
+    writer: std.Io.Writer,
+
+    pub fn init(cursor: *ExtentCursor) WriterAdapter {
+        return .{
+            .cursor = cursor,
+            .writer = .{
+                .buffer = &.{},
+                .vtable = &.{ .drain = drain },
+            },
+        };
+    }
+
+    fn drain(writer: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *WriterAdapter = @alignCast(@fieldParentPtr("writer", writer));
+
+        const buffered = writer.buffered();
+        if (buffered.len != 0) {
+            self.cursor.writeAll(buffered) catch return error.WriteFailed;
+            writer.end = 0;
+        }
+
+        var total_written: usize = 0;
+        for (data[0 .. data.len - 1]) |slice| {
+            self.cursor.writeAll(slice) catch return error.WriteFailed;
+            total_written += slice.len;
+        }
+
+        const pattern = data[data.len - 1];
+        if (pattern.len == 0 or splat == 0) return total_written;
+
+        var remaining = splat;
+        while (remaining > 0) : (remaining -= 1) {
+            self.cursor.writeAll(pattern) catch return error.WriteFailed;
+            total_written += pattern.len;
+        }
+
+        return total_written;
+    }
 };
 
 pub fn writeZeroToExtents(

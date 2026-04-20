@@ -1,28 +1,21 @@
 const std = @import("std");
+const errors = @import("../errors.zig");
 const progress = @import("../payload/progress.zig");
-const render_style = @import("../utils/render_style.zig");
+const utils = @import("../utils/root.zig");
+const render_style = utils.render_style;
+
+const Error = errors.AppError;
 
 pub const sink: progress.Sink = .{
-    .ptr = undefined,
-    .vtable = &.{
-        .render = renderImpl,
-        .printErrors = printErrorsImpl,
-    },
+    .render_fn = renderProgress,
+    .print_errors_fn = printErrors,
 };
 
-fn renderImpl(_: *anyopaque, tracker: *progress.ProgressTracker, reporter: *const progress.Reporter, prev_lines: *usize) !void {
-    try renderProgress(tracker, reporter, prev_lines);
-}
+pub fn renderProgress(tracker: *progress.ProgressTracker, reporter: *const progress.Reporter, prev_lines: *usize) Error!void {
+    if (!reporter.dynamic) return;
 
-fn printErrorsImpl(_: *anyopaque, collector: *progress.ErrorCollector, reporter: *const progress.Reporter) !void {
-    try printErrors(collector, reporter);
-}
-
-pub fn renderProgress(tracker: *progress.ProgressTracker, reporter: *const progress.Reporter, prev_lines: *usize) !void {
-    if (!reporter.canRenderDynamicProgress()) return;
-
-    const out = reporter.outputWriter();
-    try render_style.moveCursorUp(out, prev_lines.*);
+    const out = reporter.out;
+    render_style.moveCursorUp(out, prev_lines.*) catch return error.IoFailure;
 
     tracker.mutex.lockUncancelable(tracker.io);
     defer tracker.mutex.unlock(tracker.io);
@@ -47,9 +40,9 @@ pub fn renderProgress(tracker: *progress.ProgressTracker, reporter: *const progr
     }
 
     var rendered_lines: usize = 0;
-    try render_style.clearLine(out);
+    render_style.clearLine(out) catch return error.IoFailure;
     const overall_pct: usize = if (total_ops == 0) 100 else (total_done_ops * 100) / total_ops;
-    try render_style.writeHeader(out, reporter.useColor(), render_style.default_style, .{
+    render_style.writeHeader(out, reporter.use_color, render_style.default_style, .{
         .running_count = running_count,
         .failed_count = failed_count,
         .done_count = done_count,
@@ -58,33 +51,33 @@ pub fn renderProgress(tracker: *progress.ProgressTracker, reporter: *const progr
         .overall_pct = overall_pct,
         .total_done_ops = total_done_ops,
         .total_ops = total_ops,
-    });
+    }) catch return error.IoFailure;
     rendered_lines += 1;
 
     for (tracker.entries) |entry| {
         if (entry.state != .running and entry.state != .failed) continue;
 
-        try render_style.clearLine(out);
+        render_style.clearLine(out) catch return error.IoFailure;
         const done = @min(entry.done_ops, entry.total_ops);
         const row_state: render_style.RowState = switch (entry.state) {
             .running => .running,
             .failed => .failed,
             else => unreachable,
         };
-        try render_style.writeRow(out, reporter.useColor(), render_style.default_style, row_state, entry.name, done, entry.total_ops);
+        render_style.writeRow(out, reporter.use_color, render_style.default_style, row_state, entry.name, done, entry.total_ops) catch return error.IoFailure;
         rendered_lines += 1;
     }
 
     var cleared_lines = rendered_lines;
     while (cleared_lines < prev_lines.*) : (cleared_lines += 1) {
-        try out.writeAll("\x1b[2K\r\n");
+        out.writeAll("\x1b[2K\r\n") catch return error.IoFailure;
     }
 
     prev_lines.* = rendered_lines;
-    try out.flush();
+    out.flush() catch return error.IoFailure;
 }
 
-pub fn printErrors(collector: *progress.ErrorCollector, reporter: *const progress.Reporter) !void {
+pub fn printErrors(collector: *progress.ErrorCollector, reporter: *const progress.Reporter) Error!void {
     collector.mutex.lockUncancelable(collector.io);
     defer collector.mutex.unlock(collector.io);
     for (collector.messages.items) |msg| {

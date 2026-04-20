@@ -18,18 +18,6 @@ pub const Reporter = struct {
         };
     }
 
-    pub fn canRenderDynamicProgress(self: Reporter) bool {
-        return self.dynamic;
-    }
-
-    pub fn outputWriter(self: *const Reporter) *std.Io.Writer {
-        return self.out;
-    }
-
-    pub fn useColor(self: Reporter) bool {
-        return self.use_color;
-    }
-
     pub fn fail(self: *const Reporter, message: []const u8) Error!void {
         if (self.use_color) {
             self.err.writeAll("\x1b[31m[x]\x1b[0m ") catch return error.IoFailure;
@@ -155,36 +143,17 @@ pub const ErrorCollector = struct {
             self.dropped = true;
         };
     }
-
 };
 
 pub const Sink = struct {
-    ptr: *anyopaque,
-    vtable: *const VTable,
-
-    pub const VTable = struct {
-        render: *const fn (ptr: *anyopaque, tracker: *ProgressTracker, reporter: *const Reporter, prev_lines: *usize) anyerror!void,
-        printErrors: *const fn (ptr: *anyopaque, collector: *ErrorCollector, reporter: *const Reporter) anyerror!void,
-    };
-
-    pub inline fn render(self: Sink, tracker: *ProgressTracker, reporter: *const Reporter, prev_lines: *usize) !void {
-        return self.vtable.render(self.ptr, tracker, reporter, prev_lines);
-    }
-
-    pub inline fn printErrors(self: Sink, collector: *ErrorCollector, reporter: *const Reporter) !void {
-        return self.vtable.printErrors(self.ptr, collector, reporter);
-    }
-
-    pub const noop_vtable: VTable = .{
-        .render = noopRender,
-        .printErrors = noopPrintErrors,
-    };
+    render_fn: *const fn (tracker: *ProgressTracker, reporter: *const Reporter, prev_lines: *usize) Error!void,
+    print_errors_fn: *const fn (collector: *ErrorCollector, reporter: *const Reporter) Error!void,
 
     pub const noop: Sink = .{
-        .ptr = undefined,
-        .vtable = &noop_vtable,
+        .render_fn = noopRender,
+        .print_errors_fn = noopPrintErrors,
     };
 
-    fn noopRender(_: *anyopaque, _: *ProgressTracker, _: *const Reporter, _: *usize) anyerror!void {}
-    fn noopPrintErrors(_: *anyopaque, _: *ErrorCollector, _: *const Reporter) anyerror!void {}
+    fn noopRender(_: *ProgressTracker, _: *const Reporter, _: *usize) Error!void {}
+    fn noopPrintErrors(_: *ErrorCollector, _: *const Reporter) Error!void {}
 };
