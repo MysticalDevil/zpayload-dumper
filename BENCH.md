@@ -92,7 +92,7 @@ All scenarios within **±6%** of baseline—measurement noise. This confirmed th
 
 ---
 
-### 2c. Aggressive Optimization — Temp Files (`opt/payload-aggressive`, commit `140449c`)
+### 2c. Aggressive Optimization — Temp Files (`opt/payload-aggressive`, commit `face5a8`)
 
 #### Architecture
 
