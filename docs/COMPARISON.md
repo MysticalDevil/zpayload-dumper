@@ -56,7 +56,7 @@ partition is still handled by 1 thread.
 │  ├─ Open payload.bin                          │
 │  ├─ Parse manifest → build Plan               │
 │  ├─ Pre-allocate output files                 │
-│  ├─ Spawn max(concurrency, cpu_count) workers │
+│  ├─ Spawn min(concurrency, total_tasks) workers │
 │  └─ Flatten ALL operations into global queue  │
 └───────────────────────────────────────────────┘
 
@@ -72,7 +72,7 @@ Worker thread:
 ```
 
 - **Concurrency granularity**: operation-level (flattened across all partitions)
-- **Workers**: `max(concurrency, cpu_count)` threads (default 4, but capped to CPU count)
+- **Workers**: `concurrency` threads (capped by total task count)
 - **Intra-partition parallelism**: ✅ Yes. Multiple workers can decompress different operations of the same partition simultaneously.
 - **Write ordering**: Per-partition mutex + `next_expected_op` atomic counter ensures sequential writes.
 
@@ -147,74 +147,72 @@ and exercise `REPLACE`, `REPLACE_XZ`, `REPLACE_BZ`, `ZSTD`, and `ZERO` operation
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | **106 ms** | 387 ms | **3.6×** |
-| 2 | **106 ms** | 201 ms | **1.9×** |
-| 4 | **105 ms** | 111 ms | **1.1×** |
-| 8 | 107 ms | **86 ms** | 0.8× |
+| 1 | 467 ms | **394 ms** | 0.8× |
+| 2 | 266 ms | **190 ms** | 0.7× |
+| 4 | 195 ms | **119 ms** | 0.6× |
+| 8 | 129 ms | **91 ms** | 0.7× |
+| 16 | 110 ms | **93 ms** | 0.8× |
 
 #### bench128
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | **264 ms** | 1 386 ms | **5.3×** |
-| 2 | **312 ms** | 704 ms | **2.3×** |
-| 4 | **275 ms** | 442 ms | **1.6×** |
-| 8 | **267 ms** | 304 ms | **1.1×** |
-| 16 | 312 ms | **274 ms** | 0.9× |
+| 1 | 1 676 ms | **1 327 ms** | 0.8× |
+| 2 | 935 ms | **737 ms** | 0.8× |
+| 4 | 637 ms | **412 ms** | 0.6× |
+| 8 | 374 ms | **344 ms** | 0.9× |
+| 16 | 351 ms | **331 ms** | 0.9× |
 
 #### bench256
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | **507 ms** | 2 266 ms | **4.5×** |
-| 4 | **510 ms** | 765 ms | **1.5×** |
-| 8 | **489 ms** | 562 ms | **1.1×** |
+| 1 | 3 109 ms | **2 495 ms** | 0.8× |
+| 2 | 1 642 ms | **1 299 ms** | 0.8× |
+| 4 | 1 057 ms | **791 ms** | 0.7× |
+| 8 | 729 ms | **579 ms** | 0.8× |
+| 16 | 621 ms | **538 ms** | 0.9× |
 
 #### bench512
 
 | Concurrency | zpayload-dumper | payload-dumper-go | Speedup |
 |-------------|-----------------|-------------------|----------|
-| 1 | **1 013 ms** | 4 504 ms | **4.5×** |
-| 4 | **966 ms** | 1 438 ms | **1.5×** |
-| 8 | **960 ms** | 1 091 ms | **1.1×** |
+| 1 | 6 105 ms | **4 591 ms** | 0.8× |
+| 2 | 3 191 ms | **2 384 ms** | 0.7× |
+| 4 | 1 924 ms | **1 463 ms** | 0.8× |
+| 8 | 1 289 ms | **1 074 ms** | 0.8× |
+| 16 | 1 201 ms | **1 075 ms** | 0.9× |
 
 #### Zip Extraction (bench128, c=4)
 
 | Tool | Time | Speedup |
 |------|------|----------|
-| zpayload-dumper | **382 ms** | **1.3×** |
-| payload-dumper-go | 514 ms | — |
-
-#### Memory Usage (bench128, c=4)
-
-| Tool | Peak RSS |
-|------|----------|
-| zpayload-dumper | ~115 MB |
-| payload-dumper-go | ~56 MB |
+| zpayload-dumper | 665 ms | 0.8× |
+| payload-dumper-go | **508 ms** | **1.3×** |
 
 #### Key Observations from Synthetic Benchmarks
 
-1. **Single-threaded dominance**: Zig is consistently **4–5× faster** at c=1.
-   This comes from zero-allocation decompression, no GC pauses, and direct
-   `std.Io` streaming writes.
+1. **Corrected benchmark baseline**: These results were rerun after fixing
+   `zpayload-dumper` to respect the configured `--concurrency` value instead of
+   widening the worker pool to CPU thread count.
 
-2. **Concurrency scaling gap**:
+2. **Both tools now scale with concurrency**:
 
-   | Payload | zpayload-dumper c=1→c=8 | payload-dumper-go c=1→c=8 |
-   |---------|------------------------|---------------------------|
-   | bench32 | 1.0× (no gain) | **4.5×** |
-   | bench128 | 1.0× (no gain) | **4.6×** |
-   | bench256 | 1.0× (no gain) | **4.0×** |
-   | bench512 | 1.1× (barely any) | **4.1×** |
+   | Payload | zpayload-dumper c=1→c=16 | payload-dumper-go c=1→c=16 |
+   |---------|--------------------------|----------------------------|
+   | bench32 | **4.3×** | **4.2×** |
+   | bench128 | **4.8×** | **4.0×** |
+   | bench256 | **5.0×** | **4.6×** |
+   | bench512 | **5.1×** | **4.3×** |
 
-   **zpayload-dumper does not scale with concurrency.** From 1 worker to 8
-   workers wall-clock time stays flat, while Go achieves a 4× reduction.
+3. **Absolute performance gap remains**: Even after the concurrency fix, the Go
+   implementation remains faster at every rerun point. The gap shrinks at
+   higher concurrency, especially on larger payloads, but does not reverse.
 
-3. **Cross-over point**: Small payloads (bench32) see Go catch up at c=4 and
-   win at c=8. Large payloads (bench512) keep Zig ahead by ~14 % even at c=8.
-
-4. **Memory**: Zig uses roughly **2× more RAM** than Go. The 256 MB memory
-   budget for the pending queue is the primary contributor.
+4. **Current optimization target**: The Zig implementation's remaining overhead
+   is now in the execution engine itself rather than benchmark semantics. The
+   main suspects are per-operation buffer allocation, pending-queue copies,
+   linear pending flush, and spill-file I/O.
 
 ---
 

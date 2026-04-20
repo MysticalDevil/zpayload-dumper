@@ -178,7 +178,7 @@ zig build bench_pressure -- /path/to/payload.bin
 
 ### 与 payload-dumper-go 的性能对比
 
-以下数据均为 wall-clock 时间（hyperfine 5 次取均值）。
+以下数据均为 wall-clock 时间（hyperfine 3 次取均值）。
 
 **测试机器：** AMD Ryzen 7 4800H（8 核 / 16 线程），22 GB DDR4，
 ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
@@ -189,18 +189,20 @@ ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
 
 | 场景 | 并发数 | zpayload-dumper | payload-dumper-go | 加速比 |
 |------|--------|-----------------|-------------------|--------|
-| `payload.bin` | 1 线程 | **264 ms** | 1 386 ms | **5.3 倍** |
-| `payload.bin` | 4 线程 | **275 ms** | 442 ms | **1.6 倍** |
-| `payload.bin` | 8 线程 | **267 ms** | 304 ms | **1.1 倍** |
-| `ota_update.zip` | 4 线程 | **382 ms** | 514 ms | **1.3 倍** |
-
-内存占用（bench128，c=4）：zpayload-dumper 峰值 RSS 约 115 MB，payload-dumper-go 约 56 MB。
+| `payload.bin` | 1 线程 | 1 676 ms | **1 327 ms** | 0.8 倍 |
+| `payload.bin` | 4 线程 | 637 ms | **412 ms** | 0.6 倍 |
+| `payload.bin` | 8 线程 | 374 ms | **344 ms** | 0.9 倍 |
+| `ota_update.zip` | 4 线程 | 665 ms | **508 ms** | 0.8 倍 |
 
 说明：
 
-- **单线程**：Zig 实现明显更快（约 5 倍），主要得益于零分配解压路径和直接的 `std.Io` 流式写入。
-- **多线程**：随着并发数增加，SSD I/O 逐渐成为主要瓶颈，差距缩小。8 线程时两者相差约 15 %。
-- **Zip 输入**：两者都增加了约 100 ms 的解压开销，zpayload-dumper 始终保持领先。
+- **已修正并发语义**：这些结果基于修正后的实现重新测量，`--concurrency`
+  现在会真正限制 worker 数，不再隐式扩展到 CPU 线程数。
+- **扩展性**：zpayload-dumper 现在会随着并发度提升而加速，但在本轮重测里
+  payload-dumper-go 仍然整体更快。
+- **高并发差距收敛**：并发数升高后，差距明显缩小。在 `bench128` 上，
+  `c=8..16` 时双方只差约 6-9 %。
+- **Zip 输入**：zip 解包对两边都有额外开销，而且当前 Go 实现同样更快。
 
 > 完整的 benchmark 矩阵（bench32/128/256/512、并发扩展性分析、瓶颈拆解）
 > 见 [`docs/COMPARISON.md`](docs/COMPARISON.md)。

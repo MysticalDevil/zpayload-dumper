@@ -261,7 +261,7 @@ pub fn run(
 
     var budget = MemoryBudget.init(256 * 1024 * 1024); // 256 MB
 
-    const worker_count = @max(concurrency, std.Thread.getCpuCount() catch 4);
+    const worker_count = @min(concurrency, task_slice.len);
     const threads = try allocator.alloc(std.Thread, worker_count);
     defer allocator.free(threads);
 

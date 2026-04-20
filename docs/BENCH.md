@@ -119,7 +119,7 @@ Phase 1: Build global task queue
   │   └─ For each operation:
   │       append Task(partition, op_index, tmp_path) to global queue
   │
-Phase 2: Spawn workers (count = max(concurrency, cpu_count))
+Phase 2: Spawn workers (count = min(concurrency, total_tasks))
   ├─ Each worker pops Task from atomic index queue
   ├─ Decompress operation → write to {tmp_dir}/op{idx}.tmp
   └─ Verify SHA-256
