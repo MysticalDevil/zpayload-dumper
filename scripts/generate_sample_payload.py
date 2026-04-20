@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate a tiny synthetic Android payload.bin and matching extracted images.
+Generate a synthetic Android payload.bin and matching extracted images.
 
 Usage:
   python3 scripts/generate_sample_payload.py
-  python3 scripts/generate_sample_payload.py --out-root tests/data/generated --name demo
+  python3 scripts/generate_sample_payload.py --out-root tests/data/generated --name demo --total-mb 128
 """
 
 from __future__ import annotations
@@ -27,31 +27,56 @@ from typing import List, Tuple
 
 BLOCK_SIZE = 4096
 ALL_PARTITIONS = [
-    "abl",
-    "bl31",
-    "gsa",
-    "modem",
-    "pvmfw",
-    "system",
-    "vbmeta_system",
-    "vendor_dlkm",
-    "bl1",
-    "boot",
-    "init_boot",
-    "pbl",
-    "system_dlkm",
-    "tzsw",
-    "vbmeta_vendor",
-    "vendor",
-    "bl2",
-    "dtbo",
-    "ldfw",
-    "product",
-    "system_ext",
-    "vbmeta",
-    "vendor_boot",
-    "vendor_kernel_boot",
+    "abl", "bl31", "gsa", "modem", "pvmfw", "system", "vbmeta_system",
+    "vendor_dlkm", "bl1", "boot", "init_boot", "pbl", "system_dlkm",
+    "tzsw", "vbmeta_vendor", "vendor", "bl2", "dtbo", "ldfw", "product",
+    "system_ext", "vbmeta", "vendor_boot", "vendor_kernel_boot",
 ]
+
+# Fixed "special" partitions that exercise specific code paths.
+SPECIAL_PARTITIONS = {"boot", "vendor_boot", "system_ext", "product", "vbmeta"}
+
+
+def zstd_compress(raw: bytes) -> bytes:
+    proc = subprocess.run(
+        ["zstd", "-q", "--no-progress", "-c"],
+        input=raw,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"zstd compression failed: rc={proc.returncode}, stderr={proc.stderr.decode(errors='ignore')}"
+        )
+    return proc.stdout
+
+
+def make_scattered_image(pattern_a: int, pattern_b: int) -> Tuple[bytes, List["Extent"], bytes]:
+    blk_a = bytes([pattern_a]) * BLOCK_SIZE
+    blk_b = bytes([pattern_b]) * BLOCK_SIZE
+    img = bytearray(BLOCK_SIZE * 3)
+    img[0:BLOCK_SIZE] = blk_a
+    img[BLOCK_SIZE * 2 : BLOCK_SIZE * 3] = blk_b
+    return bytes(img), [Extent(0, 1), Extent(2, 1)], blk_a + blk_b
+
+
+def random_bytes(rnd: random.Random, length: int) -> bytes:
+    """Generate low-compressibility random bytes."""
+    return bytes(rnd.randrange(0, 256) for _ in range(length))
+
+
+def semi_random_bytes(rnd: random.Random, length: int) -> bytes:
+    """Generate bytes with some structure (medium compressibility)."""
+    buf = bytearray(length)
+    # Fill with repeating ~1KB chunks that have slight variation
+    chunk = bytes(rnd.randrange(0, 256) for _ in range(1024))
+    for i in range(0, length, 1024):
+        end = min(i + 1024, length)
+        # 10% chance to mutate the chunk
+        if rnd.random() < 0.1:
+            chunk = bytes(rnd.randrange(0, 256) for _ in range(1024))
+        buf[i:end] = chunk[: end - i]
+    return bytes(buf)
 
 
 @dataclass
@@ -78,31 +103,7 @@ class PartitionSpec:
     op: Operation
 
 
-def zstd_compress(raw: bytes) -> bytes:
-    proc = subprocess.run(
-        ["zstd", "-q", "--no-progress", "-c"],
-        input=raw,
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"zstd compression failed: rc={proc.returncode}, stderr={proc.stderr.decode(errors='ignore')}"
-        )
-    return proc.stdout
-
-
-def make_scattered_image(pattern_a: int, pattern_b: int) -> Tuple[bytes, List[Extent], bytes]:
-    blk_a = bytes([pattern_a]) * BLOCK_SIZE
-    blk_b = bytes([pattern_b]) * BLOCK_SIZE
-    # Write to block 0 and block 2 to keep a sparse/gap block in the middle.
-    img = bytearray(BLOCK_SIZE * 3)
-    img[0:BLOCK_SIZE] = blk_a
-    img[BLOCK_SIZE * 2 : BLOCK_SIZE * 3] = blk_b
-    return bytes(img), [Extent(0, 1), Extent(2, 1)], blk_a + blk_b
-
-
-def make_partition_spec(name: str, idx: int, rnd: random.Random) -> PartitionSpec:
+def make_partition_spec(name: str, idx: int, rnd: random.Random, block_count: int) -> PartitionSpec:
     if name == "boot":
         boot_img, boot_extents, boot_raw = make_scattered_image(0x41, 0x42)
         return PartitionSpec(
@@ -112,27 +113,27 @@ def make_partition_spec(name: str, idx: int, rnd: random.Random) -> PartitionSpe
         )
 
     if name == "vendor_boot":
-        raw = bytes([0x56]) * (BLOCK_SIZE * 2)
+        raw = bytes([0x56]) * (BLOCK_SIZE * max(2, block_count))
         return PartitionSpec(
             name="vendor_boot",
             img=raw,
-            op=Operation("REPLACE_XZ", [Extent(0, 2)], lzma.compress(raw, format=lzma.FORMAT_XZ)),
+            op=Operation("REPLACE_XZ", [Extent(0, max(2, block_count))], lzma.compress(raw, format=lzma.FORMAT_XZ)),
         )
 
     if name == "system_ext":
-        raw = bytes([0x33]) * (BLOCK_SIZE * 3)
+        raw = bytes([0x33]) * (BLOCK_SIZE * max(3, block_count))
         return PartitionSpec(
             name="system_ext",
             img=raw,
-            op=Operation("REPLACE_BZ", [Extent(0, 3)], bz2.compress(raw)),
+            op=Operation("REPLACE_BZ", [Extent(0, max(3, block_count))], bz2.compress(raw)),
         )
 
     if name == "product":
-        raw = bytes(rnd.randrange(0, 256) for _ in range(BLOCK_SIZE * 4))
+        raw = random_bytes(rnd, BLOCK_SIZE * block_count)
         return PartitionSpec(
             name="product",
             img=raw,
-            op=Operation("ZSTD", [Extent(0, 4)], zstd_compress(raw)),
+            op=Operation("ZSTD", [Extent(0, block_count)], zstd_compress(raw)),
         )
 
     if name == "vbmeta":
@@ -143,44 +144,63 @@ def make_partition_spec(name: str, idx: int, rnd: random.Random) -> PartitionSpe
             op=Operation("ZERO", [Extent(0, 1)], b""),
         )
 
-    block_count = 1 + (idx % 3)
     op_type = ("REPLACE", "REPLACE_XZ", "REPLACE_BZ", "ZSTD", "ZERO")[idx % 5]
-    raw = bytes([0x20 + (idx * 13 % 200)]) * (BLOCK_SIZE * block_count)
+
+    if op_type == "ZERO":
+        raw = bytes(BLOCK_SIZE * block_count)
+        return PartitionSpec(name=name, img=raw, op=Operation("ZERO", [Extent(0, block_count)], b""))
+
+    # Mix compressibility for realistic payload sizes
+    if op_type in ("REPLACE", "REPLACE_XZ"):
+        raw = semi_random_bytes(rnd, BLOCK_SIZE * block_count)
+    elif op_type == "REPLACE_BZ":
+        raw = semi_random_bytes(rnd, BLOCK_SIZE * block_count)
+    else:  # ZSTD
+        raw = random_bytes(rnd, BLOCK_SIZE * block_count)
+
     extents = [Extent(0, block_count)]
 
     if op_type == "REPLACE":
         return PartitionSpec(name=name, img=raw, op=Operation(op_type, extents, raw))
     if op_type == "REPLACE_XZ":
-        return PartitionSpec(
-            name=name,
-            img=raw,
-            op=Operation(op_type, extents, lzma.compress(raw, format=lzma.FORMAT_XZ)),
-        )
+        return PartitionSpec(name=name, img=raw, op=Operation(op_type, extents, lzma.compress(raw, format=lzma.FORMAT_XZ)))
     if op_type == "REPLACE_BZ":
         return PartitionSpec(name=name, img=raw, op=Operation(op_type, extents, bz2.compress(raw)))
-    if op_type == "ZSTD":
-        return PartitionSpec(name=name, img=raw, op=Operation(op_type, extents, zstd_compress(raw)))
-    return PartitionSpec(name=name, img=bytes(BLOCK_SIZE * block_count), op=Operation("ZERO", extents, b""))
+    return PartitionSpec(name=name, img=raw, op=Operation("ZSTD", extents, zstd_compress(raw)))
 
 
-def generate_specs(seed: int) -> List[PartitionSpec]:
+def generate_specs(seed: int, total_mb: int) -> List[PartitionSpec]:
     rnd = random.Random(seed)
-    return [make_partition_spec(name, idx, rnd) for idx, name in enumerate(ALL_PARTITIONS)]
+    # Calculate blocks per partition to reach target raw size.
+    # Special partitions have fixed or minimum sizes; distribute remainder.
+    fixed_blocks = {
+        "boot": 3,
+        "vendor_boot": max(2, 1),
+        "system_ext": max(3, 1),
+        "vbmeta": 1,
+    }
+    target_blocks = (total_mb * 1024 * 1024) // BLOCK_SIZE
+    special_min = sum(fixed_blocks.get(n, 0) for n in SPECIAL_PARTITIONS)
+    remaining = target_blocks - special_min
+    other_count = len(ALL_PARTITIONS) - len(SPECIAL_PARTITIONS)
+    base_blocks = max(1, remaining // other_count)
+    extra = remaining - base_blocks * other_count
+
+    specs: List[PartitionSpec] = []
+    for idx, name in enumerate(ALL_PARTITIONS):
+        if name in fixed_blocks:
+            bc = fixed_blocks[name]
+        else:
+            bc = base_blocks + (1 if idx < extra else 0)
+        specs.append(make_partition_spec(name, idx, rnd, bc))
+    return specs
 
 
 def op_type_to_proto_enum(name: str) -> str:
-    mapping = {
-        "REPLACE": "REPLACE",
-        "REPLACE_XZ": "REPLACE_XZ",
-        "REPLACE_BZ": "REPLACE_BZ",
-        "ZSTD": "ZSTD",
-        "ZERO": "ZERO",
-    }
-    return mapping[name]
+    return name
 
 
 def bytes_to_proto_string(blob: bytes) -> str:
-    # Protobuf text format bytes literal.
     return '"' + "".join(f"\\x{b:02x}" for b in blob) + '"'
 
 
@@ -289,6 +309,7 @@ def main() -> None:
     ap.add_argument("--out-root", default="tests/data/generated", help="output root directory")
     ap.add_argument("--name", default="sample", help="sample name")
     ap.add_argument("--seed", type=int, default=None, help="random seed for reproducibility")
+    ap.add_argument("--total-mb", type=int, default=128, help="target raw partition size in MB")
     args = ap.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -308,7 +329,7 @@ def main() -> None:
     if seed is None:
         seed = (time.time_ns() ^ os.getpid() ^ int.from_bytes(os.urandom(8), "little")) & ((1 << 63) - 1)
 
-    specs = generate_specs(seed)
+    specs = generate_specs(seed, args.total_mb)
     manifest_text, data_blobs = build_manifest_text(specs)
     manifest_txt_path.write_text(manifest_text)
 
@@ -328,7 +349,8 @@ def main() -> None:
     print(f"[OK] generated golden dir: {extracted_dir}")
     print(f"[INFO] seed: {seed}")
     print(f"[INFO] manifest text: {manifest_txt_path}")
-    print(f"[INFO] payload size: {payload_path.stat().st_size} bytes")
+    print(f"[INFO] payload size: {payload_path.stat().st_size:,} bytes")
+    print(f"[INFO] raw partition total: {sum(len(s.img) for s in specs):,} bytes")
 
 
 if __name__ == "__main__":
