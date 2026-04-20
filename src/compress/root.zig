@@ -45,7 +45,7 @@ pub fn decompressBz2ToWriter(
 
     var stream: c.bz_stream = std.mem.zeroes(c.bz_stream);
     if (c.BZ2_bzDecompressInit(&stream, 0, 0) != c.BZ_OK) return error.Bzip2DecompressFailed;
-    defer _ = c.BZ2_bzDecompressEnd(&stream);
+    errdefer _ = c.BZ2_bzDecompressEnd(&stream);
 
     var remaining = compressed_len;
     var pos = offset;
@@ -83,6 +83,7 @@ pub fn decompressBz2ToWriter(
         if (remaining == 0 and in_pos == in_len and produced == 0) return error.Bzip2DecompressFailed;
     }
 
+    if (c.BZ2_bzDecompressEnd(&stream) != c.BZ_OK) return error.Bzip2DecompressFailed;
     return total_written;
 }
 
