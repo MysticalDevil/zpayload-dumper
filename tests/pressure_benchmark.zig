@@ -55,13 +55,13 @@ fn runScenario(
     var err_buf: [64]u8 = undefined;
     var out_discard = std.Io.Writer.Discarding.init(&out_buf);
     var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter = app.payload.Reporter.init(&out_discard.writer, &err_discard.writer, false, false);
 
     const start = std.Io.Timestamp.now(io, .real).toNanoseconds();
     var p = try app.payload.Payload.open(gpa, io, payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, partitions, c, &ui);
+    try p.extractSelected(out_dir, partitions, c, &reporter);
     const end = std.Io.Timestamp.now(io, .real).toNanoseconds();
 
     const elapsed_ns = end - start;

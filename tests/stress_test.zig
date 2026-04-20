@@ -30,13 +30,13 @@ test "stress full extraction baseline sample" {
     var err_buf: [64]u8 = undefined;
     var out_discard = std.Io.Writer.Discarding.init(&out_buf);
     var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-    var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+    var reporter = app.payload.Reporter.init(&out_discard.writer, &err_discard.writer, false, false);
 
     const start = std.Io.Timestamp.now(io, .real).toNanoseconds();
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractAll(out_dir, 4, &ui);
+    try p.extractAll(out_dir, 4, &reporter);
     const elapsed_ns = std.Io.Timestamp.now(io, .real).toNanoseconds() - start;
     try std.testing.expect(elapsed_ns > 0);
 
@@ -62,11 +62,11 @@ test "stress selected triplet concurrency matrix is stable" {
             var err_buf: [64]u8 = undefined;
             var out_discard = std.Io.Writer.Discarding.init(&out_buf);
             var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-            var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+            var reporter = app.payload.Reporter.init(&out_discard.writer, &err_discard.writer, false, false);
             var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
             defer p.deinit();
             try p.init();
-            try p.extractSelected(out_dir, selected_triplet, c, &ui);
+            try p.extractSelected(out_dir, selected_triplet, c, &reporter);
 
             const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
             defer allocator.free(boot_out);
@@ -99,11 +99,11 @@ test "stress full extraction repeats keep file count and hashes" {
         var err_buf: [64]u8 = undefined;
         var out_discard = std.Io.Writer.Discarding.init(&out_buf);
         var err_discard = std.Io.Writer.Discarding.init(&err_buf);
-        var ui = app.payload.Ui.init(&out_discard.writer, &err_discard.writer, app.payload.ColorMode.never, false);
+        var reporter = app.payload.Reporter.init(&out_discard.writer, &err_discard.writer, false, false);
         var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
         defer p.deinit();
         try p.init();
-        try p.extractAll(out_dir, 4, &ui);
+        try p.extractAll(out_dir, 4, &reporter);
 
         try std.testing.expectEqual(@as(usize, 24), try app.fs_hash.countFilesInDir(allocator, io, out_dir));
         try assertKeyBaselines(allocator, io, out_dir);

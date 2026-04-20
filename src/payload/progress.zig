@@ -1,9 +1,46 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const ui_mod = @import("../command_line_ui.zig");
 const render_style = @import("../utils/render_style.zig");
 
-pub const Error = errors.SystemError;
+pub const Error = errors.AppError;
+
+pub const Reporter = struct {
+    out: *std.Io.Writer,
+    err: *std.Io.Writer,
+    use_color: bool,
+    dynamic: bool,
+
+    pub fn init(out: *std.Io.Writer, err: *std.Io.Writer, use_color: bool, dynamic: bool) Reporter {
+        return .{
+            .out = out,
+            .err = err,
+            .use_color = use_color,
+            .dynamic = dynamic,
+        };
+    }
+
+    pub fn canRenderDynamicProgress(self: Reporter) bool {
+        return self.dynamic;
+    }
+
+    pub fn outputWriter(self: *const Reporter) *std.Io.Writer {
+        return self.out;
+    }
+
+    pub fn useColor(self: Reporter) bool {
+        return self.use_color;
+    }
+
+    pub fn fail(self: *const Reporter, message: []const u8) Error!void {
+        if (self.use_color) {
+            self.err.writeAll("\x1b[31m[x]\x1b[0m ") catch return error.IoFailure;
+        } else {
+            self.err.writeAll("[x] ") catch return error.IoFailure;
+        }
+        self.err.writeAll(message) catch return error.IoFailure;
+        self.err.writeByte('\n') catch return error.IoFailure;
+    }
+};
 
 pub const Job = struct {
     pidx: usize,
@@ -53,7 +90,7 @@ pub const ProgressTracker = struct {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .running;
-        _ = self.dirty.swap(true, .release);
+        if (self.dirty.swap(true, .release)) {}
     }
 
     pub fn markDone(self: *ProgressTracker, idx: usize) void {
@@ -61,14 +98,14 @@ pub const ProgressTracker = struct {
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .done;
         self.entries[idx].done_ops = self.entries[idx].total_ops;
-        _ = self.dirty.swap(true, .release);
+        if (self.dirty.swap(true, .release)) {}
     }
 
     pub fn markFailed(self: *ProgressTracker, idx: usize) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .failed;
-        _ = self.dirty.swap(true, .release);
+        if (self.dirty.swap(true, .release)) {}
     }
 
     pub fn updateOps(self: *ProgressTracker, idx: usize, done_ops: usize) void {
@@ -76,7 +113,7 @@ pub const ProgressTracker = struct {
         defer self.mutex.unlock(self.io);
         if (self.entries[idx].done_ops != done_ops) {
             self.entries[idx].done_ops = done_ops;
-            _ = self.dirty.swap(true, .release);
+            if (self.dirty.swap(true, .release)) {}
         }
     }
 
@@ -111,14 +148,7 @@ pub const ErrorCollector = struct {
         return self.messages.items.len != 0 or self.dropped;
     }
 
-    pub fn add(self: *ErrorCollector, comptime fmt: []const u8, args: anytype) void {
-        const msg = std.fmt.allocPrint(self.allocator, fmt, args) catch {
-            self.mutex.lockUncancelable(self.io);
-            self.dropped = true;
-            self.mutex.unlock(self.io);
-            return;
-        };
-
+    pub fn addOwned(self: *ErrorCollector, msg: []u8) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         self.messages.append(msg) catch {
@@ -127,20 +157,20 @@ pub const ErrorCollector = struct {
         };
     }
 
-    pub fn print(self: *ErrorCollector, ui: *const ui_mod.Ui) Error!void {
+    pub fn print(self: *ErrorCollector, reporter: *const Reporter) Error!void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         for (self.messages.items) |msg| {
-            ui.fail("{s}", .{msg}) catch return error.IoFailure;
+            reporter.fail(msg) catch return error.IoFailure;
         }
-        if (self.dropped) ui.fail("some worker errors could not be recorded due to allocation failure", .{}) catch return error.IoFailure;
+        if (self.dropped) reporter.fail("some worker errors could not be recorded due to allocation failure") catch return error.IoFailure;
     }
 };
 
-pub fn renderProgress(tracker: *ProgressTracker, ui: *const ui_mod.Ui, prev_lines: *usize) !void {
-    if (!ui.canRenderDynamicProgress()) return;
+pub fn renderProgress(tracker: *ProgressTracker, reporter: *const Reporter, prev_lines: *usize) !void {
+    if (!reporter.canRenderDynamicProgress()) return;
 
-    const out = ui.outputWriter();
+    const out = reporter.outputWriter();
     try render_style.moveCursorUp(out, prev_lines.*);
 
     tracker.mutex.lockUncancelable(tracker.io);
@@ -165,10 +195,10 @@ pub fn renderProgress(tracker: *ProgressTracker, ui: *const ui_mod.Ui, prev_line
         }
     }
 
-    var lines: usize = 0;
+    var rendered_lines: usize = 0;
     try render_style.clearLine(out);
     const overall_pct: usize = if (total_ops == 0) 100 else (total_done_ops * 100) / total_ops;
-    try render_style.writeHeader(out, ui.useColor(), render_style.default_style, .{
+    try render_style.writeHeader(out, reporter.useColor(), render_style.default_style, .{
         .running_count = running_count,
         .failed_count = failed_count,
         .done_count = done_count,
@@ -178,7 +208,7 @@ pub fn renderProgress(tracker: *ProgressTracker, ui: *const ui_mod.Ui, prev_line
         .total_done_ops = total_done_ops,
         .total_ops = total_ops,
     });
-    lines += 1;
+    rendered_lines += 1;
 
     for (tracker.entries) |entry| {
         if (entry.state != .running and entry.state != .failed) continue;
@@ -190,14 +220,15 @@ pub fn renderProgress(tracker: *ProgressTracker, ui: *const ui_mod.Ui, prev_line
             .failed => .failed,
             else => unreachable,
         };
-        try render_style.writeRow(out, ui.useColor(), render_style.default_style, row_state, entry.name, done, entry.total_ops);
-        lines += 1;
+        try render_style.writeRow(out, reporter.useColor(), render_style.default_style, row_state, entry.name, done, entry.total_ops);
+        rendered_lines += 1;
     }
 
-    while (lines < prev_lines.*) : (lines += 1) {
+    var cleared_lines = rendered_lines;
+    while (cleared_lines < prev_lines.*) : (cleared_lines += 1) {
         try out.writeAll("\x1b[2K\r\n");
     }
 
-    prev_lines.* = @max(lines, prev_lines.*);
+    prev_lines.* = rendered_lines;
     try out.flush();
 }

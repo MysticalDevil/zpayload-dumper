@@ -1,26 +1,21 @@
 const std = @import("std");
 const errors = @import("errors.zig");
-const payload = @import("payload.zig");
-const ui_mod = @import("command_line_ui.zig");
-const zip_payload = @import("input/payload_zip.zig");
-const cli_args = @import("app/command_line_args.zig");
+const cli = @import("cli/root.zig");
+const cli_runner = @import("app/cli_runner.zig");
 const messages = @import("app/messages.zig");
-const output_dir = @import("app/output_dir.zig");
 
 const Error = errors.AppError;
-const default_tmp_base = "/tmp";
-const zip_suffix = ".zip";
-const zip_detected_msg = "zip input detected, extracting payload.bin first";
 
 pub fn main(init: std.process.Init) !void {
     run(init) catch |err| switch (err) {
-        error.Usage, error.HelpDisplayed => return,
+        error.Usage => std.process.exit(2),
         else => {
             const io = init.io;
             var stderr_file = std.Io.File.stderr();
             var stderr = stderr_file.writer(io, &.{});
-            stderr.interface.print("error: {s}\n", .{messages.userMessage(err)}) catch {};
-            return err;
+            const detail = errors.detail(err);
+            stderr.interface.print("error[{s}]: {s}\n", .{ detail.stable_name, messages.userMessage(err) }) catch {};
+            std.process.exit(1);
         },
     };
 }
@@ -34,86 +29,43 @@ fn run(init: std.process.Init) Error!void {
     var stdout_file = std.Io.File.stdout();
     var stderr = stderr_file.writer(io, &.{});
     var stdout = stdout_file.writer(io, &.{});
-    const err_writer = &stderr.interface;
-    const out_writer = &stdout.interface;
 
     const argv = init.minimal.args.toSlice(arena) catch return error.IoFailure;
-
-    var opts = try cli_args.parseArgs(gpa, argv, out_writer, err_writer);
-    defer opts.deinit();
-
-    const auto_color = stdout_file.isTty(io) catch |err| blk: {
-        std.log.warn("failed to detect tty for color auto mode: {}", .{err});
-        break :blk false;
+    const env_colors = cli.parse.EnvColors{
+        .zpayload_color = init.environ_map.get("ZPAYLOAD_COLOR"),
+        .no_color = init.environ_map.get("NO_COLOR"),
+        .clicolor = init.environ_map.get("CLICOLOR"),
+        .clicolor_force = init.environ_map.get("CLICOLOR_FORCE"),
     };
-    var ui = ui_mod.Ui.init(out_writer, err_writer, opts.color_mode, auto_color);
-
-    if (opts.concurrency < 1) {
-        ui.fail("invalid concurrency {d}: must be >= 1", .{opts.concurrency}) catch return error.IoFailure;
-        return error.InvalidConcurrency;
-    }
-
-    var cleanup_tmp_dir: ?[]u8 = null;
-    var cleanup_payload_path: ?[]u8 = null;
-    defer if (cleanup_payload_path) |path| gpa.free(path);
-    defer if (cleanup_tmp_dir) |path| {
-        std.Io.Dir.cwd().deleteTree(io, path) catch |err| {
-            std.log.warn("failed to cleanup temporary directory '{s}': {}", .{ path, err });
-        };
-        gpa.free(path);
+    const parse_result = cli.parse.parseArgs(gpa, env_colors, argv) catch |err| switch (err) {
+        error.Usage => {
+            cli.help.renderUsage(&stderr.interface) catch return error.IoFailure;
+            return error.Usage;
+        },
+        else => return err,
+    };
+    const terminal = cli.types.TerminalCapabilities{
+        .stdout_is_tty = stdout_file.isTty(io) catch false,
+        .stderr_is_tty = stderr_file.isTty(io) catch false,
     };
 
-    var effective_payload = opts.input.?;
-    const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
-    if (std.mem.endsWith(u8, effective_payload, zip_suffix)) {
-        ui.warn(zip_detected_msg, .{}) catch return error.IoFailure;
-        const extracted = try zip_payload.extractPayloadBinFromZip(gpa, io, tmp_base, effective_payload);
-        cleanup_tmp_dir = extracted.temp_dir;
-        cleanup_payload_path = extracted.payload_path;
-        effective_payload = extracted.payload_path;
+    switch (parse_result) {
+        .help => |color_mode| {
+            const colors = cli.parse.resolveColors(color_mode, terminal);
+            cli.help.renderFull(&stdout.interface, colors.stdout) catch return error.IoFailure;
+        },
+        .run => |options_value| {
+            var options = options_value;
+            defer options.deinit();
+            const colors = cli.parse.resolveColors(options.color_mode, terminal);
+            const ui = cli.ui.Ui.init(&stdout.interface, &stderr.interface, colors, terminal);
+            cli_runner.run(init, &options, &ui) catch |err| switch (err) {
+                error.Usage => {
+                    cli.help.renderUsage(&stderr.interface) catch return error.IoFailure;
+                    return error.Usage;
+                },
+                else => return err,
+            };
+        },
     }
-
-    ui.info("input: {s}", .{effective_payload}) catch return error.IoFailure;
-
-    var dumper = try payload.Payload.open(gpa, io, effective_payload);
-    defer dumper.deinit();
-    try dumper.init();
-
-    const partition_count = try dumper.partitionCount();
-    ui.info("manifest parsed, partitions: {d}", .{partition_count}) catch return error.IoFailure;
-    try dumper.printPartitionList(out_writer);
-
-    if (opts.list) {
-        ui.success("list mode complete", .{}) catch return error.IoFailure;
-        return;
-    }
-
-    var owned_output: ?[]u8 = null;
-    defer if (owned_output) |dir| gpa.free(dir);
-
-    const out_path = if (opts.output) |dir| dir else blk: {
-        const dir = try output_dir.makeDefaultOutputDirectory(gpa, io);
-        owned_output = dir;
-        break :blk dir;
-    };
-    std.Io.Dir.cwd().createDirPath(io, out_path) catch return error.IoFailure;
-    ui.info("output dir: {s}", .{out_path}) catch return error.IoFailure;
-    ui.info("workers: {d}", .{opts.concurrency}) catch return error.IoFailure;
-
-    if (opts.partitions) |parts_csv| {
-        var list = std.array_list.Managed([]const u8).init(gpa);
-        defer list.deinit();
-
-        var it = std.mem.splitScalar(u8, parts_csv, ',');
-        while (it.next()) |part| {
-            if (part.len != 0) try list.append(part);
-        }
-        ui.info("extracting selected partitions: {s}", .{parts_csv}) catch return error.IoFailure;
-        try dumper.extractSelected(out_path, list.items, @intCast(opts.concurrency), &ui);
-    } else {
-        ui.info("extracting all partitions", .{}) catch return error.IoFailure;
-        try dumper.extractAll(out_path, @intCast(opts.concurrency), &ui);
-    }
-
-    ui.success("extraction complete", .{}) catch return error.IoFailure;
 }
