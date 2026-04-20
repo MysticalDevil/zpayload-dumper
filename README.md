@@ -94,7 +94,8 @@ Environment variables:
 
 Disk space check:
 
-Before extraction begins, the engine checks available disk space via `statvfs`. If the output directory does not have enough free space for the selected partitions, extraction aborts immediately with a clear error message showing required vs available space.
+Before extraction begins, the engine checks available disk space via `statvfs`. If the output directory does not have enough free
+space for the selected partitions, extraction aborts immediately with a clear error message showing required vs available space.
 
 Examples:
 
@@ -125,6 +126,7 @@ zig build test_stress
 ```
 
 `test_stress` now includes:
+
 - full extraction baseline check
 - selected partition concurrency matrix (`1/2/4/8`, repeated rounds)
 - repeated full extraction stability rounds
@@ -189,11 +191,11 @@ Then verify with the dumper:
 ## References
 
 - Android Update Engine metadata proto:
-  - https://android.googlesource.com/platform/system/update_engine/+/master/update_metadata.proto
+  - <https://android.googlesource.com/platform/system/update_engine/+/master/update_metadata.proto>
 - payload-dumper-go:
-  - https://github.com/ssut/payload-dumper-go
+  - <https://github.com/ssut/payload-dumper-go>
 
 ## Thanks
 
 - Thanks to the `payload-dumper-go` project for protocol behavior reference:
-  https://github.com/ssut/payload-dumper-go
+  <https://github.com/ssut/payload-dumper-go>

@@ -6,3 +6,4 @@ testdata/
 payload.bin
 extracted_*
 *.zip
+.rumdl_cache/

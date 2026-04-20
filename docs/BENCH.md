@@ -17,13 +17,17 @@
 ## 1. The Problem
 
 Android OTA `payload.bin` contains **operations** (replace, replace_xz, replace_bz2, zstd, zero, …). Each operation has:
+
 - A compressed blob inside `payload.bin`
 - One or more **destination extents** (where the decompressed data goes in the output partition image)
 - A SHA-256 checksum
 
-A single partition may contain hundreds or thousands of operations. The baseline extractor processes **one partition per thread**, which means a large partition like `product` (~4 GB) is handled by exactly one thread—even though the CPU has 16 threads available.
+A single partition may contain hundreds or thousands of operations. The baseline extractor processes **one partition per thread**,
+which means a large partition like `product` (~4 GB) is handled by exactly one thread—even though the CPU has 16 threads
+available.
 
-**The bottleneck**: intra-partition serialization. One thread per partition cannot keep all CPU cores busy when the workload is dominated by a few large partitions.
+**The bottleneck**: intra-partition serialization. One thread per partition cannot keep all CPU cores busy when the workload is
+dominated by a few large partitions.
 
 ---
 
@@ -33,7 +37,7 @@ A single partition may contain hundreds or thousands of operations. The baseline
 
 #### Architecture
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │  Main Thread                              │
 │  ├─ Parse manifest                        │
@@ -58,7 +62,10 @@ extractPartition(thread):
 
 #### Why It Is Slow
 
-When extracting `system` (4 partitions), only 4 threads are active. When extracting all 24 partitions, the large ones (`product`, `system`, `vendor`) occupy threads for most of the duration, while small partitions finish quickly. Concurrency ≥ 2 gives a +50% boost, but c ≥ 4 shows **diminishing returns** because the wall-clock time is dominated by the single-threaded processing of the largest partition.
+When extracting `system` (4 partitions), only 4 threads are active. When extracting all 24 partitions, the large ones (`product`,
+`system`, `vendor`) occupy threads for most of the duration, while small partitions finish quickly. Concurrency ≥ 2 gives a +50%
+boost, but c ≥ 4 shows **diminishing returns** because the wall-clock time is dominated by the single-threaded processing of the
+largest partition.
 
 #### Results
 
@@ -76,19 +83,24 @@ When extracting `system` (4 partitions), only 4 threads are active. When extract
 
 Before attempting a radical redesign, we tried three "safe" optimizations that do not change the threading model:
 
-1. **Extent merging**: Adjacent extents in the same operation are coalesced into a single larger extent, reducing seek frequency.
-2. **Sort scheduling**: Partitions are sorted by total size before extraction, so large partitions start earlier (better CPU utilization at the tail end).
+1. **Extent merging**: Adjacent extents in the same operation are coalesced into a single larger extent,
+   reducing seek frequency.
+2. **Sort scheduling**: Partitions are sorted by total size before extraction, so large partitions start earlier
+   (better CPU utilization at the tail end).
 3. **Buffer reuse**: Decompression buffers are allocated once per worker and reused across operations, reducing allocator pressure.
 
 #### Why It Did Not Help
 
-- **Extent merging**: Android OTA extents are typically already multi-megabyte contiguous spans. The number of seeks saved is negligible compared to total I/O volume.
-- **Sort scheduling**: With only 4 large partitions (`system` scenario), changing start order does not alter the fundamental constraint that each partition gets exactly one thread.
+- **Extent merging**: Android OTA extents are typically already multi-megabyte contiguous spans.
+  The number of seeks saved is negligible compared to total I/O volume.
+- **Sort scheduling**: With only 4 large partitions (`system` scenario), changing start order does not alter
+  the fundamental constraint that each partition gets exactly one thread.
 - **Buffer reuse**: No measurable impact; the baseline allocator pressure was already low.
 
 #### Results
 
-All scenarios within **±6%** of baseline—measurement noise. This confirmed that the bottleneck is **not** scheduling, seeks, or allocator overhead. It is the single-thread-per-partition constraint.
+All scenarios within **±6%** of baseline—measurement noise. This confirmed that the bottleneck is **not** scheduling, seeks, or
+allocator overhead. It is the single-thread-per-partition constraint.
 
 ---
 
@@ -96,9 +108,10 @@ All scenarios within **±6%** of baseline—measurement noise. This confirmed th
 
 #### Architecture
 
-To break the intra-partition bottleneck, we flattened all operations across **all** partitions into a single global task queue, and let a pool of workers consume tasks in parallel.
+To break the intra-partition bottleneck, we flattened all operations across **all** partitions into a single global task queue,
+and let a pool of workers consume tasks in parallel.
 
-```
+```text
 Phase 1: Build global task queue
   ├─ For each partition:
   │   ├─ Create tmp_dir/{partition}/
@@ -126,9 +139,12 @@ Phase 3: Main thread merges temp files
 
 #### Why It Helped (and Where It Hurt)
 
-**Helped**: For `system` c=1, 16 workers can simultaneously decompress operations from `product`, `system`, `vendor`, and `system_ext`. Parallel decompression is a huge win when the partition count is small.
+**Helped**: For `system` c=1, 16 workers can simultaneously decompress operations from `product`, `system`, `vendor`, and
+`system_ext`. Parallel decompression is a huge win when the partition count is small.
 
-**Hurt**: For `full` c=1, 24 partitions × many operations means **all temp files exist simultaneously** before merge begins. The total temp-file volume approaches the final output size (~6.9 GB). This creates massive random I/O (create, write, read, delete) that overwhelms the benefit of parallel decompression.
+**Hurt**: For `full` c=1, 24 partitions × many operations means **all temp files exist simultaneously** before merge begins. The
+total temp-file volume approaches the final output size (~6.9 GB). This creates massive random I/O (create, write, read, delete)
+that overwhelms the benefit of parallel decompression.
 
 #### Results
 
@@ -146,13 +162,16 @@ Phase 3: Main thread merges temp files
 
 #### Insight
 
-The temp-file approach paid an I/O tax because it **separated decompression from writing**. What if workers could write decompressed data **directly** to the output file, in the correct order?
+The temp-file approach paid an I/O tax because it **separated decompression from writing**. What if workers could write
+decompressed data **directly** to the output file, in the correct order?
 
-The challenge: operations within a partition must be written sequentially (operation N must complete before operation N+1, because later operations may overwrite earlier ones, and `ExtentCursor` expects monotonic extent traversal). But workers pull tasks from a global queue in unpredictable order.
+The challenge: operations within a partition must be written sequentially (operation N must complete before operation N+1, because
+later operations may overwrite earlier ones, and `ExtentCursor` expects monotonic extent traversal). But workers pull tasks from a
+global queue in unpredictable order.
 
 #### Architecture
 
-```
+```text
 Phase 1: Pre-allocate output files, create PartitionWriteState per partition
   ├─ next_expected_op: atomic counter (starts at 0)
   ├─ pending: mutex-protected list of out-of-order operations
@@ -184,26 +203,37 @@ Phase 3: Main thread drains leftover pending
 
 **Key design decisions:**
 
-1. **In-order direct write**: When a worker finishes the exact next operation, it writes immediately—no temp file, no buffering. This is the fast path and happens most of the time.
+1. **In-order direct write**: When a worker finishes the exact next operation, it writes immediately—no temp
+   file, no buffering. This is the fast path and happens most of the time.
 
-2. **Memory-bounded pending**: A global atomic `MemoryBudget` (256 MB) limits total out-of-order data. If the budget is exhausted, data spills to small temp files. In practice, spilling is rare because operations are usually processed roughly in order.
+2. **Memory-bounded pending**: A global atomic `MemoryBudget` (256 MB) limits total out-of-order data.
+   If the budget is exhausted, data spills to small temp files. In practice, spilling is rare because operations
+   are usually processed roughly in order.
 
-3. **Chain flush**: After writing op N, the worker (or main thread) automatically checks if op N+1 is already in `pending`, and if so, writes it immediately. This cascades, so a burst of out-of-order operations can be drained in a single critical section.
+3. **Chain flush**: After writing op N, the worker (or main thread) automatically checks if op N+1 is already
+   in `pending`, and if so, writes it immediately. This cascades, so a burst of out-of-order operations can be
+   drained in a single critical section.
 
-4. **Disk-space check**: Before any file creation, `statvfs` checks the output directory. If space < required, the engine returns `InsufficientDiskSpace` with a human-friendly message showing required vs available space.
+4. **Disk-space check**: Before any file creation, `statvfs` checks the output directory. If space < required,
+   the engine returns `InsufficientDiskSpace` with a human-friendly message showing required vs available space.
 
 - **Thread model**: Global worker pool + per-partition mutex for write sequencing.
 - **Memory**: ~21 MiB worker buffers + up to 256 MB pending pool.
-- **Disk I/O**: **Single-pass**: data flows directly from decompressor to output file. Temp files only appear when memory budget is exhausted (rare).
-- **Locking**: Per-partition `std.Io.Mutex` guards `next_expected_op` and `pending`. Write operations release the mutex during I/O, so multiple workers can decompress simultaneously for the same partition.
+- **Disk I/O**: **Single-pass**: data flows directly from decompressor to output file. Temp files only appear
+  when memory budget is exhausted (rare).
+- **Locking**: Per-partition `std.Io.Mutex` guards `next_expected_op` and `pending`. Write operations release
+  the mutex during I/O, so multiple workers can decompress simultaneously for the same partition.
 
 #### Why It Is So Much Faster
 
-The temp-file approach wrote ~6.9 GB of temp data and then read it back. The streaming approach writes ~0 GB of temp data (in the common case). For `full` c=1:
+The temp-file approach wrote ~6.9 GB of temp data and then read it back. The streaming approach writes ~0 GB of temp data (in the
+common case). For `full` c=1:
+
 - Temp-file: 146s (parallel decompression + 14 GB temp I/O)
 - Streaming: 18.3s (parallel decompression + 7 GB direct output I/O)
 
-The I/O savings alone explain most of the speedup. The rest comes from eliminating the sequential merge phase—workers and the merge logic are interleaved, so the output file is populated continuously rather than waiting for all decompression to finish.
+The I/O savings alone explain most of the speedup. The rest comes from eliminating the sequential merge phase—workers and the
+merge logic are interleaved, so the output file is populated continuously rather than waiting for all decompression to finish.
 
 #### Results
 
@@ -257,13 +287,19 @@ The I/O savings alone explain most of the speedup. The rest comes from eliminati
 
 ## 5. Lessons Learned
 
-1. **Measure before optimizing.** The conservative optimizations (extent merging, sort scheduling, buffer reuse) produced zero measurable gain. Only after profiling did we realize the true bottleneck was intra-partition serialization.
+1. **Measure before optimizing.** The conservative optimizations (extent merging, sort scheduling, buffer reuse)
+   produced zero measurable gain. Only after profiling did we realize the true bottleneck was intra-partition
+   serialization.
 
-2. **Temp files are expensive.** The aggressive approach proved that parallel decompression is powerful, but the temp-file I/O tax can completely cancel it out—especially for full-extraction workloads with many partitions.
+2. **Temp files are expensive.** The aggressive approach proved that parallel decompression is powerful, but the
+   temp-file I/O tax can completely cancel it out—especially for full-extraction workloads with many partitions.
 
-3. **Streaming is the right abstraction.** By allowing workers to write directly to the output file (when in order), we retained the parallelism benefit while eliminating the I/O tax. The 256 MB memory budget is a safety valve, not the common path.
+3. **Streaming is the right abstraction.** By allowing workers to write directly to the output file (when in
+   order), we retained the parallelism benefit while eliminating the I/O tax. The 256 MB memory budget is a safety
+   valve, not the common path.
 
-4. **Disk-space checks matter.** The `statvfs` pre-check prevents users from starting a multi-gigabyte extraction on a nearly-full disk, only to fail halfway through with a cryptic I/O error.
+4. **Disk-space checks matter.** The `statvfs` pre-check prevents users from starting a multi-gigabyte extraction
+   on a nearly-full disk, only to fail halfway through with a cryptic I/O error.
 
 ---
 

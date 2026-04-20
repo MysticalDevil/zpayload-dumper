@@ -21,14 +21,14 @@ This is the **most significant difference**.
 
 ### payload-dumper-go
 
-```
-┌─────────────────────────────────────────────┐
+```text
+┌───────────────────────────────────────────────┐
 │  main()                                       │
 │  ├─ Open payload.bin                          │
 │  ├─ Parse manifest                            │
 │  ├─ Spawn N workers (goroutines)              │
 │  └─ Send each partition to workers via chan   │
-└─────────────────────────────────────────────┘
+└───────────────────────────────────────────────┘
 
 Worker goroutine:
   receive partition from channel
@@ -44,19 +44,21 @@ Worker goroutine:
 - **Workers**: `concurrency` goroutines (default 4)
 - **Intra-partition parallelism**: ❌ None. One goroutine handles all operations of a single partition.
 
-**Implication**: When extracting 4 large partitions with `concurrency=4`, you get 4 busy goroutines and 12 idle CPU threads. When extracting 1 large partition with `concurrency=4`, 3 workers are idle after the small partitions finish, and the last large partition is still handled by 1 thread.
+**Implication**: When extracting 4 large partitions with `concurrency=4`, you get 4 busy goroutines and 12 idle CPU threads. When
+extracting 1 large partition with `concurrency=4`, 3 workers are idle after the small partitions finish, and the last large
+partition is still handled by 1 thread.
 
 ### zpayload-dumper
 
-```
-┌─────────────────────────────────────────────┐
+```text
+┌───────────────────────────────────────────────┐
 │  main()                                       │
 │  ├─ Open payload.bin                          │
 │  ├─ Parse manifest → build Plan               │
 │  ├─ Pre-allocate output files                 │
 │  ├─ Spawn max(concurrency, cpu_count) workers │
 │  └─ Flatten ALL operations into global queue  │
-└─────────────────────────────────────────────┘
+└───────────────────────────────────────────────┘
 
 Worker thread:
   pop Task(partition, op_index) from atomic queue
@@ -74,7 +76,8 @@ Worker thread:
 - **Intra-partition parallelism**: ✅ Yes. Multiple workers can decompress different operations of the same partition simultaneously.
 - **Write ordering**: Per-partition mutex + `next_expected_op` atomic counter ensures sequential writes.
 
-**Implication**: All CPU cores stay busy regardless of partition count. Even extracting a single large partition keeps 16 threads decompressing in parallel.
+**Implication**: All CPU cores stay busy regardless of partition count. Even extracting a single large partition keeps 16 threads
+decompressing in parallel.
 
 ---
 
@@ -88,7 +91,8 @@ Worker thread:
 | **Seek strategy** | Per-extent `Seek()` + `io.CopyN` | Per-extent `seekTo()` + `writeAll` via `ExtentCursor` |
 | **SHA-256** | `io.TeeReader` (stream hash) | `std.crypto.hash.sha2.Sha256` (chunk hash) |
 
-Both projects avoid temp files in the common path. The Go version never uses them; the Zig version uses them only as a fallback when the 256MB memory budget is exhausted.
+Both projects avoid temp files in the common path. The Go version never uses them; the Zig version uses them only as a fallback
+when the 256MB memory budget is exhausted.
 
 ---
 
@@ -103,11 +107,14 @@ Measured on the same machine (Ryzen 7 4800H, NVMe SSD) with the same real OTA pa
 | full c=1 | ~100s | **18.3s** | **5.5×** |
 | full c=4 | ~67s | **20.7s** | **3.2×** |
 
-> Go version estimates are based on its identical architecture to our baseline (`3f22fea`), which showed the same performance profile.
+> Go version estimates are based on its identical architecture to our baseline (`3f22fea`), which showed the same performance
+profile.
 
 **Why the gap?**
 
-The Go version is architecturally identical to our baseline: **partition-level parallelism with no intra-partipartition parallelization**. The Zig rewrite's operation-level parallelism + streaming direct-write is the sole reason for the 3–5.5× speedup.
+The Go version is architecturally identical to our baseline: **partition-level parallelism with no intra-partipartition
+parallelization**. The Zig rewrite's operation-level parallelism + streaming direct-write is the sole reason for the 3–5.5×
+speedup.
 
 ---
 
@@ -115,7 +122,7 @@ The Go version is architecturally identical to our baseline: **partition-level p
 
 ### payload-dumper-go
 
-```
+```text
 payload-dumper-go/
 ├── main.go              # CLI entry, flag parsing, zip extraction
 ├── payload.go           # Core: header parse, manifest decode, Extract()
@@ -131,7 +138,7 @@ payload-dumper-go/
 
 ### zpayload-dumper
 
-```
+```text
 zpayload-dumper/
 ├── src/
 │   ├── main.zig           # CLI entry
@@ -282,11 +289,14 @@ require (
 
 ## 10. Go Version Strengths
 
-The comparison above focuses on where the Zig rewrite wins. It is important to also acknowledge what the Go implementation does well:
+The comparison above focuses on where the Zig rewrite wins. It is important to also acknowledge what the Go implementation does
+well:
 
 ### 10.1 Simplicity & Brevity
 
-At ~650 lines of core code vs ~2,900, the Go version is **dramatically easier to read and modify**. A new contributor can read `payload.go` in 10 minutes and understand the entire extraction pipeline. The Zig codebase requires understanding multiple modules (`engine`, `extract_plan`, `extent_writer`, `progress`, `errors`, `cli/...`) before making changes.
+At ~650 lines of core code vs ~2,900, the Go version is **dramatically easier to read and modify**. A new contributor can read
+`payload.go` in 10 minutes and understand the entire extraction pipeline. The Zig codebase requires understanding multiple modules
+(`engine`, `extract_plan`, `extent_writer`, `progress`, `errors`, `cli/...`) before making changes.
 
 ### 10.2 Build Simplicity
 
@@ -298,17 +308,21 @@ go build
 zig build   # fails if upb, lzma, bz2, zstd are missing
 ```
 
-The Go version bundles all compression libraries through pure-Go or cgo-wrapped modules (`gozstd`, `go-xz`, standard `compress/bzip2`). The Zig version requires the user to install native system libraries (`upb`, `utf8_range`, `lzma`, `bz2`, `zstd`) before compilation.
+The Go version bundles all compression libraries through pure-Go or cgo-wrapped modules (`gozstd`, `go-xz`, standard
+`compress/bzip2`). The Zig version requires the user to install native system libraries (`upb`, `utf8_range`, `lzma`, `bz2`,
+`zstd`) before compilation.
 
 ### 10.3 Memory Safety Without Effort
 
 Go's garbage collector means:
+
 - No use-after-free bugs
 - No double-free bugs
 - No memory leaks (in the manual-management sense)
 - No allocator choice anxiety (Zig forces you to pick and thread an allocator through every call)
 
-The Zig version manually manages memory in a multi-threaded context, which is powerful but adds cognitive load and bug surface area.
+The Zig version manually manages memory in a multi-threaded context, which is powerful but adds cognitive load and bug surface
+area.
 
 ### 10.4 Ecosystem & Tooling
 
@@ -331,11 +345,13 @@ GOOS=windows GOARCH=amd64 go build
 zig build -Dtarget=x86_64-windows-gnu   # need Windows upb/lzma/bz2/zstd
 ```
 
-Go's pure-Go dependencies make cross-compilation seamless. Zig's C dependencies (`upb`, `lzma`, etc.) require either cross-compiled versions of those libraries or building them from source for the target.
+Go's pure-Go dependencies make cross-compilation seamless. Zig's C dependencies (`upb`, `lzma`, etc.) require either
+cross-compiled versions of those libraries or building them from source for the target.
 
 ### 10.6 Concurrency Model Clarity
 
-Go's goroutine + channel model is **easier to reason about** than Zig's manual thread spawning + atomic operations + mutexes. The Go worker pool is 20 lines of code. The Zig streaming engine is 600+ lines of carefully coordinated lock-free and lock-based code.
+Go's goroutine + channel model is **easier to reason about** than Zig's manual thread spawning + atomic operations + mutexes. The
+Go worker pool is 20 lines of code. The Zig streaming engine is 600+ lines of carefully coordinated lock-free and lock-based code.
 
 For most I/O-bound workloads, Go's simpler model is fast enough and much safer to maintain.
 
@@ -370,4 +386,5 @@ zig build -Doptimize=ReleaseFast
 time ./zig-out/bin/zpayload-dumper -o zig_out --concurrency=1 /path/to/payload.bin
 ```
 
-> Both require the same `payload.bin` or `.zip` input. Use a real OTA for meaningful results (synthetic payloads are too small to show I/O differences).
+> Both require the same `payload.bin` or `.zip` input. Use a real OTA for meaningful results (synthetic payloads are too small to
+show I/O differences).

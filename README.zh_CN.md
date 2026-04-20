@@ -4,7 +4,9 @@
 
 从 Android OTA 更新包中提取分区镜像的命令行工具
 
-Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数据打包成一个特殊的 `payload.bin` 文件，放在 zip 包里面。这个工具可以读取 `payload.bin`，并把里面每个分区的镜像（比如 `boot.img`、`vbmeta.img`、`system.img` 等）单独提取出来。
+Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数据打包成一个特殊的 `payload.bin` 文件，
+放在 zip 包里面。这个工具可以读取 `payload.bin`，并把里面每个分区的镜像（比如
+`boot.img`、`vbmeta.img`、`system.img` 等）单独提取出来。
 
 > [!IMPORTANT]
 > 需要 Zig 0.16.0 或更高版本
@@ -59,7 +61,8 @@ sudo pacman -S --needed protobuf xz bzip2 zstd grpc
 sudo emerge --ask dev-libs/protobuf app-arch/xz-utils app-arch/bzip2 app-arch/zstd net-libs/grpc
 ```
 
-> Gentoo 的 `dev-libs/protobuf` 有 `libupb` USE 标志。如果你的系统配置没有编译出可链接的 `upb`/`utf8_range`，需要先手动安装再执行 `zig build`
+> Gentoo 的 `dev-libs/protobuf` 有 `libupb` USE 标志。如果你的系统配置没有编译出可链接的 `upb`/`utf8_range`，
+> 需要先手动安装再执行 `zig build`
 
 ## 编译
 
@@ -199,9 +202,9 @@ python3 scripts/generate_sample_payload.py --name smoke1
 ## 参考
 
 - Android Update Engine 元数据格式：
-  - https://android.googlesource.com/platform/system/update_engine/+/master/update_metadata.proto
+  - <https://android.googlesource.com/platform/system/update_engine/+/master/update_metadata.proto>
 - Go 语言的同类项目：
-  - https://github.com/ssut/payload-dumper-go
+  - <https://github.com/ssut/payload-dumper-go>
 
 ## 致谢
 
