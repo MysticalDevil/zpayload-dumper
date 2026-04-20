@@ -8,3 +8,4 @@ extracted_*
 *.zip
 .rumdl_cache/
 docker/
+.codex
