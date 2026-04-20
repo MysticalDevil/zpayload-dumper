@@ -471,6 +471,8 @@ fn workerMain(shared: *Shared) void {
                 if (!std.mem.eql(u8, expected, &hash)) break :blk error.ChecksumMismatch;
             }
 
+            // Verify decompressed size
+            if (n != op.expected_uncompressed) break :blk error.UnexpectedBytesWritten;
             break :blk n;
         };
 
@@ -710,7 +712,7 @@ fn cleanupPendingData(io: std.Io, allocator: std.mem.Allocator, budget: *MemoryB
 }
 
 fn recordError(shared: *Shared, part: *PartitionWriteState, operation_index: usize, err: anyerror) void {
-    const msg = std.fmt.allocPrint(std.heap.page_allocator, "failed to process {s} op{d}: {s}", .{
+    const msg = std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s}", .{
         part.job.name,
         operation_index,
         @errorName(err),
