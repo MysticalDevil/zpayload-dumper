@@ -14,6 +14,7 @@ fn suggestionForError(err: Error) ?[]const u8 {
         error.InvalidMagic => "ensure the file is a valid payload.bin (expected CrAU header)",
         error.UnsupportedPayloadVersion => "ensure the payload uses version 2",
         error.InsufficientDiskSpace => "specify a different output directory with -o or free up disk space",
+        error.MissingOldImage => "this is a delta payload; use --old <dir> to provide source partition images",
         error.IoFailure => "verify the file path is correct and the file is readable",
         error.OutOfMemory => "close other applications or reduce concurrency with -c",
         error.TimeUnavailable => "check system clock configuration",
@@ -95,7 +96,8 @@ fn run(init: std.process.Init, main_stderr: *std.Io.Writer) Error!void {
                 .use_color = colors.stdout,
                 .dynamic = terminal.stdout_is_tty,
             };
-            cli.runner.run(init, &options, &ui, &reporter) catch |err| switch (err) {
+            const build_options = @import("build_options");
+            cli.runner.run(init, &options, &ui, &reporter, build_options.bsdiff_enabled) catch |err| switch (err) {
                 error.Usage => {
                     const help_colors = cli.parse.resolveColors(options.color_mode, terminal);
                     cli.help.renderUsage(&stdout.interface, help_colors.stdout) catch return error.IoFailure;

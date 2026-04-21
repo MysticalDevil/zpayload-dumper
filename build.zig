@@ -97,9 +97,12 @@ pub fn build(b: *std.Build) void {
     const cache_root_path = b.cache_root.path orelse @panic("std.Build cache_root.path is unavailable");
     const local_cache_dir = b.allocator.dupe(u8, cache_root_path) catch @panic("OOM");
 
+    const bsdiff_enabled = b.option(bool, "bsdiff", "Enable SOURCE_BSDIFF support") orelse false;
+
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", version_string);
     build_options.addOption([]const u8, "local_cache_dir", local_cache_dir);
+    build_options.addOption(bool, "bsdiff_enabled", bsdiff_enabled);
 
     const protoc = b.addSystemCommand(&.{"protoc"});
     const upb_out = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
