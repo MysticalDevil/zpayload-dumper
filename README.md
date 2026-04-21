@@ -102,14 +102,28 @@ zig build
 
 ### Cross-Architecture Release Builds
 
-Two release scripts are provided. Choose the one that matches your host setup:
+Two release scripts are provided for different host setups:
 
 | Script | x86_64 | aarch64 | Host Requirements | Speed |
 |---|---|---|---|---|
-| `scripts/build-release.sh` | Docker (`--platform linux/amd64`) | Docker (`--platform linux/arm64`) | Any machine with Docker | Slow for aarch64 (protobuf compiled under qemu) |
-| `scripts/build-release-native.sh` | Native `zig build` | Docker + Gentoo crossdev sysroot | Gentoo with `crossdev` + `aarch64-unknown-linux-gnu-emerge` | Fast for both |
+| `scripts/build-release.sh` | Docker (`--platform linux/amd64`) | Docker (`--platform linux/arm64`) | Docker + qemu-user-static (binfmt) | Slow for aarch64 (~30+ min) |
+| `scripts/build-release-native.sh` | Native `zig build` | Docker + Gentoo crossdev sysroot | Gentoo with `crossdev` | Fast for both |
 
-**Generic (any host)** — works everywhere, but aarch64 builds protobuf from source under qemu emulation (~30+ min):
+#### Prerequisites for Docker cross-compilation
+
+Building the aarch64 binary on an x86_64 host requires **qemu-user-static** with binfmt_misc support so Docker can run arm64 containers:
+
+```bash
+# Gentoo
+sudo emerge app-emulation/qemu[static-user]
+# Verify
+ls /proc/sys/fs/binfmt_misc/qemu-aarch64
+```
+
+#### Generic build (`scripts/build-release.sh`)
+
+Uses `Dockerfile` for **both** architectures. This works on any machine with Docker and qemu,
+but the aarch64 build compiles protobuf from source under qemu emulation, which is very slow.
 
 ```bash
 just release-generic
@@ -117,7 +131,11 @@ just release-generic
 ./scripts/build-release.sh
 ```
 
-**Native-optimized (Gentoo hosts)** — reuses the host's crossdev aarch64 sysroot to skip protobuf compilation under qemu:
+#### Native-optimized build (`scripts/build-release-native.sh`)
+
+For **Gentoo hosts with crossdev** installed. The x86_64 binary is compiled natively; the aarch64
+binary is built inside an arm64 Docker container that reuses the host's pre-built crossdev sysroot
+libraries, skipping protobuf compilation under qemu.
 
 ```bash
 # One-time: install aarch64 dependencies into crossdev sysroot
@@ -127,6 +145,13 @@ just release-native
 # or directly:
 ./scripts/build-release-native.sh
 ```
+
+#### Dockerfiles
+
+| File | Used by | Description |
+|---|---|---|
+| `Dockerfile` | `build-release.sh` | Multi-arch Debian builder. Installs build tools, compiles protobuf from source, and downloads the correct Zig binary for the target architecture. |
+| `Dockerfile.aarch64` | `build-release-native.sh` | Arm64-only builder. Copies pre-built protobuf/upb libraries from the host's Gentoo crossdev sysroot (`/usr/aarch64-unknown-linux-gnu/`) instead of compiling under qemu. |
 
 Both scripts place artifacts in `release/` with `SHA256SUMS`.
 
