@@ -105,8 +105,10 @@ pub const Payload = struct {
         concurrency: usize,
         reporter: *const Reporter,
         sink: progress.Sink,
+        old_dir: ?[]const u8,
+        bsdiff_enabled: bool,
     ) Error!void {
-        return self.extractSelected(output_dir, &.{}, concurrency, reporter, sink);
+        return self.extractSelected(output_dir, &.{}, concurrency, reporter, sink, old_dir, bsdiff_enabled);
     }
 
     pub fn extractSelected(
@@ -116,6 +118,8 @@ pub const Payload = struct {
         concurrency: usize,
         reporter: *const Reporter,
         sink: progress.Sink,
+        old_dir: ?[]const u8,
+        bsdiff_enabled: bool,
     ) Error!void {
         if (!self.ctx_initialized) return error.ManifestNotInitialized;
         const ctx = self.ctx;
@@ -159,6 +163,8 @@ pub const Payload = struct {
                 c: usize,
                 trk: *progress.ProgressTracker,
                 coll: *progress.ErrorCollector,
+                old: ?[]const u8,
+                bsdiff: bool,
             ) void {
                 e.* = if (engine.run(
                     payload.allocator,
@@ -174,10 +180,12 @@ pub const Payload = struct {
                     c,
                     trk,
                     coll,
+                    old,
+                    bsdiff,
                 )) |_| null else |err| err;
                 done.store(true, .release);
             }
-        }.run, .{ &engine_err, &engine_done, self, &plan, output_dir, concurrency, &tracker, &collector }) catch return error.IoFailure;
+        }.run, .{ &engine_err, &engine_done, self, &plan, output_dir, concurrency, &tracker, &collector, old_dir, bsdiff_enabled }) catch return error.IoFailure;
 
         while (!engine_done.load(.acquire)) {
             const now_ns = std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
@@ -217,7 +225,11 @@ pub const Payload = struct {
         concurrency: usize,
         reporter: *const Reporter,
         sink: progress.Sink,
+        old_dir: ?[]const u8,
+        bsdiff_enabled: bool,
     ) Error!void {
+        _ = old_dir;
+        _ = bsdiff_enabled;
         if (!self.ctx_initialized) return error.ManifestNotInitialized;
         const ctx = self.ctx;
         if (concurrency < 1) return error.InvalidConcurrency;

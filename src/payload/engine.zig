@@ -5,6 +5,7 @@ const compress = @import("../compress/root.zig");
 const progress = @import("progress.zig");
 const extent_writer = @import("extent_writer.zig");
 const extract_plan = @import("extract_plan.zig");
+const bsdiff = @import("bsdiff.zig");
 
 pub const Error = errors.AppError;
 
@@ -180,6 +181,8 @@ const Shared = struct {
     collector: *progress.ErrorCollector,
     data_offset: u64,
     spill_dir: []const u8,
+    old_dir: ?[]const u8,
+    bsdiff_enabled: bool,
     allocator: std.mem.Allocator,
 };
 
@@ -197,6 +200,8 @@ pub fn run(
     concurrency: usize,
     tracker: *progress.ProgressTracker,
     collector: *progress.ErrorCollector,
+    old_dir: ?[]const u8,
+    bsdiff_enabled: bool,
 ) Error!void {
 
     // --- Phase 1: Disk space check ---
@@ -311,6 +316,8 @@ pub fn run(
         .collector = collector,
         .data_offset = data_offset,
         .spill_dir = spill_dir,
+        .old_dir = old_dir,
+        .bsdiff_enabled = bsdiff_enabled,
         .allocator = allocator,
     };
 
@@ -409,6 +416,7 @@ fn workerMain(shared: *Shared) void {
 
         const write_result = materializeOperationBuffer(
             shared,
+            part.job.name,
             op,
             &hasher,
             &buffer,
@@ -591,6 +599,7 @@ fn flushPending(shared: *Shared, part: *PartitionWriteState) void {
 
 fn materializeOperationBuffer(
     shared: *Shared,
+    partition_name: []const u8,
     op: extract_plan.Operation,
     hasher: *std.crypto.hash.sha2.Sha256,
     buffer: *std.Io.Writer.Allocating,
@@ -604,6 +613,8 @@ fn materializeOperationBuffer(
         .replace_bz => try compress.decompressBz2ToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, compress_in_buf, compress_out_buf),
         .zstd => try compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
         .zero => try materializeZeroBuffer(shared, op, hasher, buffer, zero_buf),
+        .source_copy => try materializeSourceCopy(shared, partition_name, op, hasher, buffer),
+        .source_bsdiff => try materializeSourceBsdiff(shared, partition_name, op, hasher, buffer),
         else => return error.UnhandledOperationType,
     };
 
@@ -614,6 +625,95 @@ fn materializeOperationBuffer(
     }
     if (written != op.expected_uncompressed) return error.UnexpectedBytesWritten;
     return written;
+}
+
+fn materializeSourceBsdiff(
+    shared: *Shared,
+    partition_name: []const u8,
+    op: extract_plan.Operation,
+    hasher: *std.crypto.hash.sha2.Sha256,
+    buffer: *std.Io.Writer.Allocating,
+) Error!usize {
+    if (!shared.bsdiff_enabled) return error.UnhandledOperationType;
+    const old_dir = shared.old_dir orelse return error.MissingOldImage;
+
+    const path = std.fmt.allocPrint(shared.allocator, "{s}/{s}.img", .{ old_dir, partition_name }) catch return error.OutOfMemory;
+    defer shared.allocator.free(path);
+
+    var old_file = std.Io.Dir.cwd().openFile(shared.io, path, .{ .mode = .read_only }) catch return error.IoFailure;
+    defer old_file.close(shared.io);
+
+    var old_data = std.array_list.Managed(u8).init(shared.allocator);
+    defer old_data.deinit();
+
+    var read_buf: [64 * 1024]u8 = undefined;
+    for (op.src_extents) |extent| {
+        var remaining = extent.length_bytes;
+        var position = extent.offset_bytes;
+        while (remaining > 0) {
+            const chunk_len: usize = @intCast(@min(remaining, read_buf.len));
+            const n = old_file.readPositionalAll(shared.io, read_buf[0..chunk_len], position) catch return error.IoFailure;
+            if (n != chunk_len) return error.IoFailure;
+            old_data.appendSlice(read_buf[0..chunk_len]) catch return error.OutOfMemory;
+            remaining -= chunk_len;
+            position += chunk_len;
+        }
+    }
+
+    // Read patch blob from payload
+    var patch_data = shared.allocator.alloc(u8, op.blob_length) catch return error.OutOfMemory;
+    defer shared.allocator.free(patch_data);
+    {
+        var pos: u64 = 0;
+        while (pos < op.blob_length) {
+            const n = shared.payload_file.readPositionalAll(shared.io, patch_data[pos..], op.blob_offset + pos) catch return error.IoFailure;
+            if (n == 0) return error.IoFailure;
+            pos += n;
+        }
+    }
+
+    const result = bsdiff.applyPatch(shared.allocator, old_data.items, patch_data, @intCast(op.expected_uncompressed)) catch |err| return err;
+    defer shared.allocator.free(result);
+
+    hasher.update(result);
+    buffer.writer.writeAll(result) catch return error.IoFailure;
+    return result.len;
+}
+
+fn materializeSourceCopy(
+    shared: *Shared,
+    partition_name: []const u8,
+    op: extract_plan.Operation,
+    hasher: *std.crypto.hash.sha2.Sha256,
+    buffer: *std.Io.Writer.Allocating,
+) Error!usize {
+    const old_dir = shared.old_dir orelse return error.MissingOldImage;
+
+    const path = std.fmt.allocPrint(shared.allocator, "{s}/{s}.img", .{ old_dir, partition_name }) catch return error.OutOfMemory;
+    defer shared.allocator.free(path);
+
+    var file = std.Io.Dir.cwd().openFile(shared.io, path, .{ .mode = .read_only }) catch return error.IoFailure;
+    defer file.close(shared.io);
+
+    var total_read: usize = 0;
+    var read_buf: [64 * 1024]u8 = undefined;
+
+    for (op.src_extents) |extent| {
+        var remaining = extent.length_bytes;
+        var position = extent.offset_bytes;
+        while (remaining > 0) {
+            const chunk_len: usize = @intCast(@min(remaining, read_buf.len));
+            const n = file.readPositionalAll(shared.io, read_buf[0..chunk_len], position) catch return error.IoFailure;
+            if (n != chunk_len) return error.IoFailure;
+            hasher.update(read_buf[0..chunk_len]);
+            buffer.writer.writeAll(read_buf[0..chunk_len]) catch return error.IoFailure;
+            total_read += chunk_len;
+            remaining -= chunk_len;
+            position += chunk_len;
+        }
+    }
+
+    return total_read;
 }
 
 fn materializeZeroBuffer(
@@ -704,11 +804,18 @@ fn cleanupPendingData(io: std.Io, allocator: std.mem.Allocator, budget: *MemoryB
 }
 
 fn recordError(shared: *Shared, part: *PartitionWriteState, operation_index: usize, err: anyerror) void {
-    const msg = std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s}", .{
-        part.job.name,
-        operation_index,
-        @errorName(err),
-    }) catch null;
+    const msg = if (err == error.MissingOldImage)
+        std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s} (use --old <dir> to provide source partition images for delta payload)", .{
+            part.job.name,
+            operation_index,
+            @errorName(err),
+        }) catch null
+    else
+        std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s}", .{
+            part.job.name,
+            operation_index,
+            @errorName(err),
+        }) catch null;
     if (msg) |m| shared.collector.addOwned(m);
     part.has_errors.store(true, .release);
 }
