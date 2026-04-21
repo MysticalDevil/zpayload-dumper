@@ -94,10 +94,8 @@ pub fn build(b: *std.Build) void {
         const zon = @import("build.zig.zon");
         break :blk b.allocator.dupe(u8, zon.version) catch "dev-unknown";
     };
-    const local_cache_dir = blk: {
-        if (b.cache_root.path) |path| break :blk b.allocator.dupe(u8, path) catch ".zig-cache";
-        break :blk ".zig-cache";
-    };
+    const cache_root_path = b.cache_root.path orelse @panic("std.Build cache_root.path is unavailable");
+    const local_cache_dir = b.allocator.dupe(u8, cache_root_path) catch @panic("OOM");
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", version_string);
@@ -138,6 +136,7 @@ pub fn build(b: *std.Build) void {
 
     const run_tests = createTestRun(b, root_module);
     const integration_module = createRootModule(b, options, "tests/integration.zig");
+    integration_module.addOptions("build_options", build_options);
     attachIntegrationImport(integration_module, zpayload_mod);
     const run_integration = createTestRun(b, integration_module);
     const test_step = b.step("test", "Run unit tests");
@@ -149,6 +148,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&run_integration.step);
 
     const stress_module = createRootModule(b, options, "tests/stress_test.zig");
+    stress_module.addOptions("build_options", build_options);
     attachIntegrationImport(stress_module, zpayload_mod);
     const run_stress = createTestRun(b, stress_module);
     const stress_step = b.step("test_stress", "Run stress/integration tests");

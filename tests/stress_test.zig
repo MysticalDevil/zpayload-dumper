@@ -1,7 +1,12 @@
 const std = @import("std");
 const app = @import("zpayload");
+const build_options = @import("build_options");
 
 const selected_triplet = &app.fixtures.selected_triplet;
+
+fn testOutputPath(allocator: std.mem.Allocator, tmp_sub_path: []const u8, suffix: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/tmp/{s}/{s}", .{ build_options.local_cache_dir, tmp_sub_path, suffix });
+}
 
 fn assertKeyBaselines(allocator: std.mem.Allocator, io: std.Io, out_dir: []const u8) !void {
     const boot_out = try std.fmt.allocPrint(allocator, "{s}/boot.img", .{out_dir});
@@ -22,7 +27,7 @@ test "stress full extraction baseline sample" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/stress_out", .{tmp.sub_path});
+    const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], "stress_out");
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
@@ -54,7 +59,9 @@ test "stress selected triplet concurrency matrix is stable" {
         for (concurrencies) |c| {
             var tmp = std.testing.tmpDir(.{});
             defer tmp.cleanup();
-            const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/stress_selected_c{d}", .{ tmp.sub_path, c });
+            const suffix = try std.fmt.allocPrint(allocator, "stress_selected_c{d}", .{c});
+            defer allocator.free(suffix);
+            const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], suffix);
             defer allocator.free(out_dir);
             try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
@@ -91,7 +98,9 @@ test "stress full extraction repeats keep file count and hashes" {
     while (round < rounds) : (round += 1) {
         var tmp = std.testing.tmpDir(.{});
         defer tmp.cleanup();
-        const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/stress_all_round_{d}", .{ tmp.sub_path, round });
+        const suffix = try std.fmt.allocPrint(allocator, "stress_all_round_{d}", .{round});
+        defer allocator.free(suffix);
+        const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], suffix);
         defer allocator.free(out_dir);
         try std.Io.Dir.cwd().createDirPath(io, out_dir);
 

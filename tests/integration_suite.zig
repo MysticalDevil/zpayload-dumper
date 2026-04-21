@@ -1,8 +1,13 @@
 const std = @import("std");
 const app = @import("zpayload");
+const build_options = @import("build_options");
 
 const selected_triplet = &app.fixtures.selected_triplet;
 const default_tmp_base = "/tmp";
+
+fn testOutputPath(allocator: std.mem.Allocator, tmp_sub_path: []const u8, suffix: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/tmp/{s}/{s}", .{ build_options.local_cache_dir, tmp_sub_path, suffix });
+}
 
 const TestReporter = struct {
     out_buf: [64]u8 = undefined,
@@ -27,7 +32,7 @@ test "integration selected partitions match go baseline" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/out", .{tmp.sub_path});
+    const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], "out");
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
@@ -56,7 +61,7 @@ test "extract selected writes only requested partition" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/only_vendor_boot", .{tmp.sub_path});
+    const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], "only_vendor_boot");
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
@@ -106,7 +111,7 @@ test "extract selected unknown partition produces no files" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/unknown_partition", .{tmp.sub_path});
+    const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], "unknown_partition");
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
@@ -127,7 +132,7 @@ test "invalid magic payload returns InvalidMagic" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const bad_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/bad_payload.bin", .{tmp.sub_path});
+    const bad_path = try testOutputPath(allocator, tmp.sub_path[0..], "bad_payload.bin");
     defer allocator.free(bad_path);
     {
         var f = try std.Io.Dir.cwd().createFile(io, bad_path, .{ .truncate = true });
@@ -151,7 +156,7 @@ test "invalid concurrency returns InvalidConcurrency" {
     var p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
     defer p.deinit();
     try p.init();
-    try std.testing.expectError(error.InvalidConcurrency, p.extractAll(".zig-cache", 0, &reporter_holder.reporter, app.payload.Sink.noop));
+    try std.testing.expectError(error.InvalidConcurrency, p.extractAll(build_options.local_cache_dir, 0, &reporter_holder.reporter, app.payload.Sink.noop));
 }
 
 test "zip input extraction path matches sample baseline" {
@@ -176,7 +181,7 @@ test "zip input extraction path matches sample baseline" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const out_dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/zip_out", .{tmp.sub_path});
+    const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], "zip_out");
     defer allocator.free(out_dir);
     try std.Io.Dir.cwd().createDirPath(io, out_dir);
 
