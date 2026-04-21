@@ -647,6 +647,7 @@ fn materializeSourceBsdiff(
     defer old_data.deinit();
 
     var read_buf: [64 * 1024]u8 = undefined;
+    var src_hasher = std.crypto.hash.sha2.Sha256.init(.{});
     for (op.src_extents) |extent| {
         var remaining = extent.length_bytes;
         var position = extent.offset_bytes;
@@ -655,9 +656,16 @@ fn materializeSourceBsdiff(
             const n = old_file.readPositionalAll(shared.io, read_buf[0..chunk_len], position) catch return error.IoFailure;
             if (n != chunk_len) return error.IoFailure;
             old_data.appendSlice(read_buf[0..chunk_len]) catch return error.OutOfMemory;
+            src_hasher.update(read_buf[0..chunk_len]);
             remaining -= chunk_len;
             position += chunk_len;
         }
+    }
+
+    if (op.src_sha256) |expected| {
+        var hash: [32]u8 = undefined;
+        src_hasher.final(&hash);
+        if (!std.mem.eql(u8, expected, &hash)) return error.ChecksumMismatch;
     }
 
     // Read patch blob from payload
@@ -697,6 +705,7 @@ fn materializeSourceCopy(
 
     var total_read: usize = 0;
     var read_buf: [64 * 1024]u8 = undefined;
+    var src_hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
     for (op.src_extents) |extent| {
         var remaining = extent.length_bytes;
@@ -706,11 +715,18 @@ fn materializeSourceCopy(
             const n = file.readPositionalAll(shared.io, read_buf[0..chunk_len], position) catch return error.IoFailure;
             if (n != chunk_len) return error.IoFailure;
             hasher.update(read_buf[0..chunk_len]);
+            src_hasher.update(read_buf[0..chunk_len]);
             buffer.writer.writeAll(read_buf[0..chunk_len]) catch return error.IoFailure;
             total_read += chunk_len;
             remaining -= chunk_len;
             position += chunk_len;
         }
+    }
+
+    if (op.src_sha256) |expected| {
+        var hash: [32]u8 = undefined;
+        src_hasher.final(&hash);
+        if (!std.mem.eql(u8, expected, &hash)) return error.ChecksumMismatch;
     }
 
     return total_read;

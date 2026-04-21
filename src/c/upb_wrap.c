@@ -152,6 +152,18 @@ const uint8_t* zp_operation_data_sha256(
   return (const uint8_t*)hash.data;
 }
 
+const uint8_t* zp_operation_src_sha256(
+    const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t* out_len) {
+  const chromeos_update_engine_InstallOperation* op = zp_get_operation(ctx, partition_index, operation_index);
+  if (!op) {
+    if (out_len) *out_len = 0;
+    return NULL;
+  }
+  upb_StringView hash = chromeos_update_engine_InstallOperation_src_sha256_hash(op);
+  if (out_len) *out_len = hash.size;
+  return (const uint8_t*)hash.data;
+}
+
 size_t zp_dst_extent_count(const zp_ctx* ctx, size_t partition_index, size_t operation_index) {
   const chromeos_update_engine_InstallOperation* op = zp_get_operation(ctx, partition_index, operation_index);
   if (!op) return 0;

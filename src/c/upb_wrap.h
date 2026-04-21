@@ -18,6 +18,7 @@ int32_t zp_operation_type(const zp_ctx* ctx, size_t partition_index, size_t oper
 uint64_t zp_operation_data_offset(const zp_ctx* ctx, size_t partition_index, size_t operation_index);
 uint64_t zp_operation_data_length(const zp_ctx* ctx, size_t partition_index, size_t operation_index);
 const uint8_t* zp_operation_data_sha256(const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t* out_len);
+const uint8_t* zp_operation_src_sha256(const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t* out_len);
 
 size_t zp_dst_extent_count(const zp_ctx* ctx, size_t partition_index, size_t operation_index);
 uint64_t zp_dst_extent_start_block(const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index);

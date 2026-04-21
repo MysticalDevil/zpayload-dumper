@@ -15,6 +15,7 @@ pub const Operation = struct {
     src_extents: []const Extent,
     src_length: u64,
     sha256: ?[]const u8,
+    src_sha256: ?[]const u8,
 };
 
 pub const PartitionJob = struct {
@@ -134,6 +135,9 @@ pub fn buildPlan(
             const sha256_raw = ctx.operationSha256(partition_index, operation_index);
             const sha256: ?[]const u8 = if (sha256_raw) |s| try aa.dupe(u8, s) else null;
 
+            const src_sha256_raw = ctx.operationSrcSha256(partition_index, operation_index);
+            const src_sha256: ?[]const u8 = if (src_sha256_raw) |s| try aa.dupe(u8, s) else null;
+
             operations[operation_index] = .{
                 .op_type = op_type,
                 .blob_offset = blob_abs,
@@ -143,6 +147,7 @@ pub fn buildPlan(
                 .src_extents = src_extents,
                 .src_length = src_length,
                 .sha256 = sha256,
+                .src_sha256 = src_sha256,
             };
         }
 

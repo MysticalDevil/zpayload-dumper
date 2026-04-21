@@ -71,6 +71,12 @@ pub const Context = struct {
         return sliceFromPtrLen(p, n);
     }
 
+    pub fn operationSrcSha256(self: Context, partition_index: usize, operation_index: usize) ?[]const u8 {
+        var n: usize = 0;
+        const p = c.zp_operation_src_sha256(self.raw, partition_index, operation_index, &n);
+        return sliceFromPtrLen(p, n);
+    }
+
     pub fn dstExtentCount(self: Context, partition_index: usize, operation_index: usize) usize {
         return c.zp_dst_extent_count(self.raw, partition_index, operation_index);
     }
