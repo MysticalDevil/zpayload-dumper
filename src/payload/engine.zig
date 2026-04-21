@@ -57,38 +57,6 @@ fn formatSize(buf: []u8, bytes: u64) []const u8 {
 // ArrayList writer adapter for std.Io.Writer
 // ---------------------------------------------------------------------------
 
-const ArrayListWriter = struct {
-    list: *std.array_list.Managed(u8),
-    writer: std.Io.Writer,
-
-    pub fn init(list: *std.array_list.Managed(u8)) ArrayListWriter {
-        return .{
-            .list = list,
-            .writer = .{
-                .buffer = &.{},
-                .vtable = &.{ .drain = drain },
-            },
-        };
-    }
-
-    fn drain(writer: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
-        const self: *ArrayListWriter = @alignCast(@fieldParentPtr("writer", writer));
-        var total_written: usize = 0;
-        for (data[0 .. data.len - 1]) |slice| {
-            self.list.appendSlice(slice) catch return error.WriteFailed;
-            total_written += slice.len;
-        }
-        const pattern = data[data.len - 1];
-        if (pattern.len == 0 or splat == 0) return total_written;
-        var remaining = splat;
-        while (remaining > 0) : (remaining -= 1) {
-            self.list.appendSlice(pattern) catch return error.WriteFailed;
-            total_written += pattern.len;
-        }
-        return total_written;
-    }
-};
-
 // ---------------------------------------------------------------------------
 // Core types
 // ---------------------------------------------------------------------------
@@ -417,7 +385,7 @@ fn workerMain(shared: *Shared) void {
     var compress_out_buf: [compress.chunk_size]u8 = undefined;
     var zero_buf: [1024 * 1024]u8 = undefined;
     var writer_buf: [64 * 1024]u8 = undefined;
-    var buffer = std.array_list.Managed(u8).init(shared.allocator);
+    var buffer = std.Io.Writer.Allocating.init(shared.allocator);
     defer buffer.deinit();
     @memset(&zero_buf, 0);
 
@@ -437,44 +405,17 @@ fn workerMain(shared: *Shared) void {
         }
 
         buffer.clearRetainingCapacity();
-        var al_writer = ArrayListWriter.init(&buffer);
         var hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
-        const write_result: Error!usize = blk: {
-            const n = switch (op.op_type) {
-                .replace => compress.copyRawToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf) catch |err| break :blk err,
-                .replace_xz => compress.decompressXzToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, shared.allocator) catch |err| break :blk err,
-                .replace_bz => compress.decompressBz2ToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, &compress_in_buf, &compress_out_buf) catch |err| break :blk err,
-                .zstd => compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, &hasher, &al_writer.writer, shared.allocator) catch |err| break :blk err,
-                .zero => blk_zero: {
-                    var remaining = op.blob_length;
-                    var position = op.blob_offset;
-                    while (remaining > 0) {
-                        const chunk_len: usize = @intCast(@min(remaining, zero_buf.len));
-                        const read_count = shared.payload_file.readPositionalAll(shared.io, zero_buf[0..chunk_len], position) catch break :blk error.IoFailure;
-                        std.debug.assert(read_count == chunk_len);
-                        hasher.update(zero_buf[0..chunk_len]);
-                        remaining -= chunk_len;
-                        position += chunk_len;
-                    }
-                    buffer.resize(op.expected_uncompressed) catch break :blk error.OutOfMemory;
-                    @memset(buffer.items, 0);
-                    break :blk_zero op.expected_uncompressed;
-                },
-                else => break :blk error.UnhandledOperationType,
-            };
-
-            // Verify SHA-256
-            if (op.sha256) |expected| {
-                var hash: [32]u8 = undefined;
-                hasher.final(&hash);
-                if (!std.mem.eql(u8, expected, &hash)) break :blk error.ChecksumMismatch;
-            }
-
-            // Verify decompressed size
-            if (n != op.expected_uncompressed) break :blk error.UnexpectedBytesWritten;
-            break :blk n;
-        };
+        const write_result = materializeOperationBuffer(
+            shared,
+            op,
+            &hasher,
+            &buffer,
+            &compress_in_buf,
+            &compress_out_buf,
+            &zero_buf,
+        );
 
         if (write_result) |_| {} else |err| {
             recordError(shared, part, task.operation_index, err);
@@ -483,7 +424,7 @@ fn workerMain(shared: *Shared) void {
             continue;
         }
 
-        const data = buffer.items;
+        const data = buffer.written();
 
         // Try to write directly or buffer.
         part.pending_mutex.lockUncancelable(shared.io);
@@ -646,6 +587,57 @@ fn flushPending(shared: *Shared, part: *PartitionWriteState) void {
         part.pending_mutex.lockUncancelable(shared.io);
         part.next_expected_op.store(next + 1, .monotonic);
     }
+}
+
+fn materializeOperationBuffer(
+    shared: *Shared,
+    op: extract_plan.Operation,
+    hasher: *std.crypto.hash.sha2.Sha256,
+    buffer: *std.Io.Writer.Allocating,
+    compress_in_buf: []u8,
+    compress_out_buf: []u8,
+    zero_buf: []u8,
+) Error!usize {
+    const written = switch (op.op_type) {
+        .replace => try compress.copyRawToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, compress_in_buf),
+        .replace_xz => try compress.decompressXzToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
+        .replace_bz => try compress.decompressBz2ToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, compress_in_buf, compress_out_buf),
+        .zstd => try compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
+        .zero => try materializeZeroBuffer(shared, op, hasher, buffer, zero_buf),
+        else => return error.UnhandledOperationType,
+    };
+
+    if (op.sha256) |expected| {
+        var hash: [32]u8 = undefined;
+        hasher.final(&hash);
+        if (!std.mem.eql(u8, expected, &hash)) return error.ChecksumMismatch;
+    }
+    if (written != op.expected_uncompressed) return error.UnexpectedBytesWritten;
+    return written;
+}
+
+fn materializeZeroBuffer(
+    shared: *Shared,
+    op: extract_plan.Operation,
+    hasher: *std.crypto.hash.sha2.Sha256,
+    buffer: *std.Io.Writer.Allocating,
+    zero_buf: []u8,
+) Error!usize {
+    var remaining = op.blob_length;
+    var position = op.blob_offset;
+    while (remaining > 0) {
+        const chunk_len: usize = @intCast(@min(remaining, zero_buf.len));
+        const read_count = shared.payload_file.readPositionalAll(shared.io, zero_buf[0..chunk_len], position) catch return error.IoFailure;
+        std.debug.assert(read_count == chunk_len);
+        hasher.update(zero_buf[0..chunk_len]);
+        remaining -= chunk_len;
+        position += chunk_len;
+    }
+
+    const len: usize = @intCast(op.expected_uncompressed);
+    const zeroes = buffer.writer.writableSlice(len) catch return error.OutOfMemory;
+    @memset(zeroes, 0);
+    return op.expected_uncompressed;
 }
 
 fn scheduleNextTask(shared: *Shared, partition_index: usize) void {

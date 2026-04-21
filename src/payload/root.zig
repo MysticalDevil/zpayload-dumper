@@ -27,7 +27,8 @@ pub const Payload = struct {
     header: header.Header = .{},
     metadata_size: u64 = 0,
     data_offset: u64 = 0,
-    ctx: ?upb.Context = null,
+    ctx: upb.Context = undefined,
+    ctx_initialized: bool = false,
 
     pub fn open(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) Error!Payload {
         const file = std.Io.Dir.cwd().openFile(io, filename, .{}) catch return error.IoFailure;
@@ -35,11 +36,19 @@ pub const Payload = struct {
             .allocator = allocator,
             .io = io,
             .file = file,
+            .header = .{},
+            .metadata_size = 0,
+            .data_offset = 0,
+            .ctx = undefined,
+            .ctx_initialized = false,
         };
     }
 
     pub fn deinit(self: *Payload) void {
-        if (self.ctx) |*ctx| ctx.deinit();
+        if (self.ctx_initialized) {
+            self.ctx.deinit();
+            self.ctx_initialized = false;
+        }
         if (self.file) |file| file.close(self.io);
     }
 
@@ -54,6 +63,7 @@ pub const Payload = struct {
         defer self.allocator.free(signature_buf);
 
         self.ctx = try upb.Context.init(manifest_buf, signature_buf);
+        self.ctx_initialized = true;
         self.metadata_size = 24 + self.header.manifest_len;
         self.data_offset = self.metadata_size + self.header.metadata_signature_len;
     }
@@ -65,12 +75,14 @@ pub const Payload = struct {
             .metadata_signature_len = signature.len,
         };
         self.ctx = try upb.Context.init(manifest, signature);
+        self.ctx_initialized = true;
         self.metadata_size = 24 + self.header.manifest_len;
         self.data_offset = self.metadata_size + self.header.metadata_signature_len;
     }
 
     pub fn printPartitionList(self: *Payload, writer: *std.Io.Writer) Error!void {
-        const ctx = self.ctx orelse return error.ManifestNotInitialized;
+        if (!self.ctx_initialized) return error.ManifestNotInitialized;
+        const ctx = self.ctx;
         writer.writeAll("Found partitions:\n") catch return error.IoFailure;
         const count = ctx.partitionCount();
         var index: usize = 0;
@@ -83,8 +95,8 @@ pub const Payload = struct {
     }
 
     pub fn partitionCount(self: *Payload) Error!usize {
-        const ctx = self.ctx orelse return error.ManifestNotInitialized;
-        return ctx.partitionCount();
+        if (!self.ctx_initialized) return error.ManifestNotInitialized;
+        return self.ctx.partitionCount();
     }
 
     pub fn extractAll(
@@ -105,7 +117,8 @@ pub const Payload = struct {
         reporter: *const Reporter,
         sink: progress.Sink,
     ) Error!void {
-        const ctx = self.ctx orelse return error.ManifestNotInitialized;
+        if (!self.ctx_initialized) return error.ManifestNotInitialized;
+        const ctx = self.ctx;
         if (concurrency < 1) return error.InvalidConcurrency;
 
         var plan = try extract_plan.buildPlan(self.allocator, ctx, self.data_offset, selected);
@@ -205,7 +218,8 @@ pub const Payload = struct {
         reporter: *const Reporter,
         sink: progress.Sink,
     ) Error!void {
-        const ctx = self.ctx orelse return error.ManifestNotInitialized;
+        if (!self.ctx_initialized) return error.ManifestNotInitialized;
+        const ctx = self.ctx;
         if (concurrency < 1) return error.InvalidConcurrency;
 
         var plan = try extract_plan.buildPlan(self.allocator, ctx, self.data_offset, selected);

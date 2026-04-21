@@ -48,34 +48,26 @@ pub fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_ba
         const name = filename_buf[0..entry.filename_len];
         fr.interface.readSliceAll(name) catch return error.InvalidZipArchive;
         if (std.mem.eql(u8, name, "payload.bin")) {
-            const temp_base = selectTempBase(allocator, tmp_base, entry.uncompressed_size) catch return error.IoFailure;
-            defer allocator.free(temp_base.base_path);
+            const preferred_base = selectTempBase(allocator, tmp_base, entry.uncompressed_size) catch return error.IoFailure;
+            defer allocator.free(preferred_base.base_path);
 
-            var nonce: u64 = undefined;
-            io.random(std.mem.asBytes(&nonce));
-            const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ temp_base.base_path, nonce });
-            errdefer allocator.free(dir_path);
-
-            createTempBaseIfNeeded(io, temp_base.base_path, temp_base.is_absolute) catch return error.IoFailure;
-
-            if (temp_base.is_absolute) {
-                std.Io.Dir.createDirAbsolute(io, dir_path, .default_dir) catch return error.IoFailure;
-                var temp_dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{}) catch return error.IoFailure;
-                defer temp_dir.close(io);
-                entry.extract(&fr, .{}, &filename_buf, temp_dir) catch return error.InvalidZipArchive;
-            } else {
-                std.Io.Dir.cwd().createDir(io, dir_path, .default_dir) catch return error.IoFailure;
-                var temp_dir = std.Io.Dir.cwd().openDir(io, dir_path, .{}) catch return error.IoFailure;
-                defer temp_dir.close(io);
-                entry.extract(&fr, .{}, &filename_buf, temp_dir) catch return error.InvalidZipArchive;
+            if (try attemptExtractPayloadEntry(allocator, io, &fr, entry, &filename_buf, preferred_base, true)) |result| {
+                return result;
             }
 
-            const payload_path = try std.fmt.allocPrint(allocator, "{s}/payload.bin", .{dir_path});
-            return .{
-                .temp_dir = dir_path,
-                .payload_path = payload_path,
-                .used_fallback_tmp = temp_base.used_fallback,
+            if (preferred_base.used_fallback) return error.IoFailure;
+
+            const fallback_base = TempBaseSelection{
+                .base_path = try allocator.dupe(u8, ".tmp"),
+                .is_absolute = false,
+                .used_fallback = true,
             };
+            defer allocator.free(fallback_base.base_path);
+
+            if (try attemptExtractPayloadEntry(allocator, io, &fr, entry, &filename_buf, fallback_base, true)) |result| {
+                return result;
+            }
+            return error.IoFailure;
         }
     }
 
@@ -186,6 +178,91 @@ const TempBaseSelection = struct {
     is_absolute: bool,
     used_fallback: bool,
 };
+
+fn attemptExtractPayloadEntry(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    fr: *std.Io.File.Reader,
+    entry: std.zip.Iterator.Entry,
+    filename_buf: []u8,
+    temp_base: TempBaseSelection,
+    allow_space_retry: bool,
+) Error!?ZipExtractResult {
+    var nonce: u64 = undefined;
+    io.random(std.mem.asBytes(&nonce));
+    const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ temp_base.base_path, nonce });
+    errdefer allocator.free(dir_path);
+
+    createTempBaseIfNeeded(io, temp_base.base_path, temp_base.is_absolute) catch return error.IoFailure;
+    createTempDir(io, dir_path, temp_base.is_absolute) catch return error.IoFailure;
+    errdefer cleanupExtractedPayloadTempDir(io, dir_path) catch {};
+
+    const extract_err = extractEntryIntoDir(io, fr, entry, filename_buf, dir_path, temp_base.is_absolute);
+    if (extract_err) |_| {} else |err| {
+        if (allow_space_retry and shouldRetryWithFallback(err)) {
+            allocator.free(dir_path);
+            return null;
+        }
+        return mapZipExtractError(err);
+    }
+
+    const payload_path = try std.fmt.allocPrint(allocator, "{s}/payload.bin", .{dir_path});
+    return .{
+        .temp_dir = dir_path,
+        .payload_path = payload_path,
+        .used_fallback_tmp = temp_base.used_fallback,
+    };
+}
+
+fn createTempDir(io: std.Io, dir_path: []const u8, is_absolute: bool) !void {
+    if (is_absolute) {
+        try std.Io.Dir.createDirAbsolute(io, dir_path, .default_dir);
+        return;
+    }
+    try std.Io.Dir.cwd().createDir(io, dir_path, .default_dir);
+}
+
+fn extractEntryIntoDir(
+    io: std.Io,
+    fr: *std.Io.File.Reader,
+    entry: std.zip.Iterator.Entry,
+    filename_buf: []u8,
+    dir_path: []const u8,
+    is_absolute: bool,
+) anyerror!void {
+    if (is_absolute) {
+        var temp_dir = try std.Io.Dir.openDirAbsolute(io, dir_path, .{});
+        defer temp_dir.close(io);
+        try entry.extract(fr, .{}, filename_buf, temp_dir);
+        return;
+    }
+
+    var temp_dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{});
+    defer temp_dir.close(io);
+    try entry.extract(fr, .{}, filename_buf, temp_dir);
+}
+
+fn shouldRetryWithFallback(err: anyerror) bool {
+    return switch (err) {
+        error.NoSpaceLeft,
+        error.DiskQuota,
+        error.FileTooBig,
+        error.WriteFailed,
+        => true,
+        else => false,
+    };
+}
+
+fn mapZipExtractError(err: anyerror) Error {
+    return switch (err) {
+        error.NoSpaceLeft,
+        error.DiskQuota,
+        error.FileTooBig,
+        error.WriteFailed,
+        => error.IoFailure,
+        else => error.InvalidZipArchive,
+    };
+}
 
 const StatVfs = extern struct {
     f_bsize: u64,

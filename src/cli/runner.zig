@@ -40,21 +40,27 @@ pub fn run(
     };
 
     const is_zip_input = std.mem.endsWith(u8, options.input, zip_suffix);
-    var effective_payload: []const u8 = options.input;
-    var dumper: payload.Payload = undefined;
 
     if (is_zip_input and options.dry_run) {
         ui.warn("zip input detected, reading payload metadata in memory for dry-run") catch return error.IoFailure;
         try logPath(ui, "input zip: {s}", options.input);
         var metadata = try zip_payload.readPayloadMetadataFromZip(gpa, io, options.input);
         defer metadata.deinit(gpa);
-        dumper = .{
+        var dumper = payload.Payload{
             .allocator = gpa,
             .io = io,
+            .file = null,
+            .header = .{},
+            .metadata_size = 0,
+            .data_offset = 0,
+            .ctx = undefined,
+            .ctx_initialized = false,
         };
         defer dumper.deinit();
         try dumper.initFromMetadata(metadata.manifest, metadata.signature);
+        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_zip_input);
     } else {
+        var effective_payload: []const u8 = options.input;
         const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
         if (is_zip_input) {
             ui.warn("zip input detected, extracting payload.bin first") catch return error.IoFailure;
@@ -68,10 +74,23 @@ pub fn run(
         }
 
         try logPath(ui, "input: {s}", effective_payload);
-        dumper = try payload.Payload.open(gpa, io, effective_payload);
+        var dumper = try payload.Payload.open(gpa, io, effective_payload);
         defer dumper.deinit();
         try dumper.init();
+        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_zip_input);
     }
+}
+
+fn runWithPayload(
+    dumper: *payload.Payload,
+    options: *const types.CliOptions,
+    ui: *const cli_ui.Ui,
+    reporter: *const payload.Reporter,
+    effective_concurrency: usize,
+    is_zip_input: bool,
+) Error!void {
+    const gpa = dumper.allocator;
+    const io = dumper.io;
 
     if (is_zip_input and options.dry_run) {
         try logPath(ui, "metadata source: {s}", "payload.bin inside zip (in-memory)");

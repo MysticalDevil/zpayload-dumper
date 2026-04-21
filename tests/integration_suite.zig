@@ -87,6 +87,18 @@ test "sample payload partition count is stable" {
     try std.testing.expectEqual(@as(usize, 24), try p.partitionCount());
 }
 
+test "payload opened into predeclared variable keeps context initialized" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var p: app.payload.Payload = undefined;
+    p = try app.payload.Payload.open(allocator, io, app.fixtures.sample_payload_path);
+    defer p.deinit();
+
+    try p.init();
+    try std.testing.expectEqual(@as(usize, 24), try p.partitionCount());
+}
+
 test "extract selected unknown partition produces no files" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -159,7 +171,7 @@ test "zip input extraction path matches sample baseline" {
         allocator.free(extracted.payload_path);
     }
 
-    try std.testing.expect(!extracted.used_fallback_tmp);
+    try std.testing.expect(app.fs_hash.fileExists(io, extracted.payload_path));
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
