@@ -475,7 +475,7 @@ time ./pdgo -c 1 -o go_out /path/to/payload.bin
 # Zig 版本
 cd /path/to/zpayload-dumper
 zig build -Doptimize=ReleaseFast
-time ./zig-out/bin/zpayload-dumper -o zig_out --concurrency=1 /path/to/payload.bin
+time zig build run -Doptimize=ReleaseFast -- -o zig_out --concurrency=1 /path/to/payload.bin
 ```
 
 > 两者需要相同的 `payload.bin` 或 `.zip` 输入。使用真实 OTA 才能获得有意义的结果（合成 payload 太小，无法体现 I/O 差异）。

@@ -31,4 +31,4 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 WORKDIR /src
 COPY . /src/
-RUN zig build -Doptimize=ReleaseFast
+RUN zig build -Doptimize=ReleaseFast --prefix /opt/zpayload-install

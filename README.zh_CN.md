@@ -69,7 +69,7 @@ sudo emerge --ask dev-libs/protobuf app-arch/bzip2 net-libs/grpc
 zig build
 ```
 
-编译完成后，可执行文件位于 `./zig-out/bin/zpayload-dumper`。
+编译完成后，可通过 `zig build run -- ...` 直接运行，或从安装前缀的 `bin/zpayload-dumper` 调用。
 
 ## 用法
 
@@ -77,20 +77,20 @@ zig build
 
 ```bash
 # 只列出所有分区，不提取
-./zig-out/bin/zpayload-dumper -l payload.bin
+zig build run -- -l payload.bin
 
 # 提取所有分区
-./zig-out/bin/zpayload-dumper -o out payload.bin
+zig build run -- -o out payload.bin
 
 # 只提取指定分区
-./zig-out/bin/zpayload-dumper -p boot,vendor -o out payload.bin
+zig build run -- -p boot,vendor -o out payload.bin
 
 # 也可以直接处理 zip 格式的 OTA 包
-./zig-out/bin/zpayload-dumper payload.zip
+zig build run -- payload.zip
 
 # 模拟提取（不实际写入，用于测试进度 UI）
-./zig-out/bin/zpayload-dumper --dry-run -p boot,vendor payload.bin
-./zig-out/bin/zpayload-dumper --dry-run payload.zip
+zig build run -- --dry-run -p boot,vendor payload.bin
+zig build run -- --dry-run payload.zip
 ```
 
 ### 选项
@@ -230,8 +230,8 @@ python3 scripts/generate_sample_payload.py --name bench128 --total-mb 128
 输出会放到 `tests/data/`（该目录被 git 忽略），然后可以验证：
 
 ```bash
-./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_out tests/data/generated/smoke1/payload.bin
-./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_zip_out tests/data/generated/smoke1/ota_update.zip
+zig build run -- -o tmp/smoke1_out tests/data/generated/smoke1/payload.bin
+zig build run -- -o tmp/smoke1_zip_out tests/data/generated/smoke1/ota_update.zip
 ```
 
 ## 支持的 Payload 特性

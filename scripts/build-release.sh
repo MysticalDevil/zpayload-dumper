@@ -10,6 +10,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/release"
+DOCKER_PREFIX="/opt/zpayload-install"
 
 ARCH=$(uname -m)
 DOCKER_ARCH=$([ "$ARCH" = "aarch64" ] && echo "linux/arm64" || echo "linux/amd64")
@@ -22,7 +23,7 @@ echo "=== Building $ARCH (Docker, platform=$DOCKER_ARCH) ==="
 cd "$ROOT"
 docker build --network host --platform "$DOCKER_ARCH" -t zpayload-builder:release .
 CID=$(docker create zpayload-builder:release)
-docker cp "$CID":/src/zig-out/bin/zpayload-dumper "$OUT/$OUT_NAME"
+docker cp "$CID":"$DOCKER_PREFIX/bin/zpayload-dumper" "$OUT/$OUT_NAME"
 docker rm "$CID"
 
 echo "=== Checksum ==="

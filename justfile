@@ -26,4 +26,4 @@ release:
     ./scripts/build-release.sh
 
 clean:
-    rm -rf .zig-cache zig-out tests/data/generated release
+    rm -rf .zig-* zig-*out tests/data/generated release .build-release

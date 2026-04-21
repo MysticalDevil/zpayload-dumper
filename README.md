@@ -119,7 +119,7 @@ The artifact is placed in `release/` with `SHA256SUMS`.
 ## Usage
 
 ```bash
-./zig-out/bin/zpayload-dumper [options] /path/to/payload.bin
+zig build run -- [options] /path/to/payload.bin
 ```
 
 Options:
@@ -167,11 +167,11 @@ space for the selected partitions, extraction aborts immediately with a clear er
 Examples:
 
 ```bash
-./zig-out/bin/zpayload-dumper -l payload.bin
-./zig-out/bin/zpayload-dumper -p boot,vendor -o out payload.bin
-./zig-out/bin/zpayload-dumper payload.zip
-./zig-out/bin/zpayload-dumper --dry-run -p boot,vendor payload.bin
-./zig-out/bin/zpayload-dumper --dry-run payload.zip
+zig build run -- -l payload.bin
+zig build run -- -p boot,vendor -o out payload.bin
+zig build run -- payload.zip
+zig build run -- --dry-run -p boot,vendor payload.bin
+zig build run -- --dry-run payload.zip
 ```
 
 Progress:
@@ -293,8 +293,8 @@ python3 scripts/generate_sample_payload.py --name bench128 --total-mb 128
 Then verify with the dumper:
 
 ```bash
-./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_out /path/to/payload.bin
-./zig-out/bin/zpayload-dumper -o .zig-cache/smoke1_zip_out /path/to/ota_update.zip
+zig build run -- -o tmp/smoke1_out /path/to/payload.bin
+zig build run -- -o tmp/smoke1_zip_out /path/to/ota_update.zip
 ```
 
 ## References

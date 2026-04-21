@@ -492,7 +492,7 @@ time ./pdgo -c 1 -o go_out /path/to/payload.bin
 # Zig version
 cd /path/to/zpayload-dumper
 zig build -Doptimize=ReleaseFast
-time ./zig-out/bin/zpayload-dumper -o zig_out --concurrency=1 /path/to/payload.bin
+time zig build run -Doptimize=ReleaseFast -- -o zig_out --concurrency=1 /path/to/payload.bin
 ```
 
 > Both require the same `payload.bin` or `.zip` input. Use a real OTA for meaningful results (synthetic payloads are too small to
