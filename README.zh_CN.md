@@ -100,7 +100,7 @@ zig build
 | `-l`, `--list` | 列出所有分区后退出 |
 | `-p`, `--partitions <csv>` | 只提取指定的分区（用逗号分隔） |
 | `-o`, `--output <dir>` | 输出目录（默认：`extracted_YYYYMMDD_HHMMSS`） |
-| `-c`, `--concurrency <n>` | 并行工作线程数（默认：4） |
+| `-c`, `--concurrency <n>` | 并行工作线程数（默认：`nproc / 2`，逻辑线程数的一半） |
 | `--dry-run` | 模拟提取进度，不实际写入输出（用于测试进度 UI 或验证 payload 可解析性） |
 | `--color` | 等价于 `--color=always` |
 | `--color=<mode>` | 颜色模式：`auto`、`always`、`never` |

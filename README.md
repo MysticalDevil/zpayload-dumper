@@ -102,58 +102,19 @@ zig build
 
 ### Cross-Architecture Release Builds
 
-Two release scripts are provided for different host setups:
+#### Release Build via Docker
 
-| Script | x86_64 | aarch64 | Host Requirements | Speed |
-|---|---|---|---|---|
-| `scripts/build-release.sh` | Docker (`--platform linux/amd64`) | Docker (`--platform linux/arm64`) | Docker + qemu-user-static (binfmt) | Slow for aarch64 (~30+ min) |
-| `scripts/build-release-native.sh` | Native `zig build` | Docker + Gentoo crossdev sysroot | Gentoo with `crossdev` | Fast for both |
-
-#### Prerequisites for Docker cross-compilation
-
-Building the aarch64 binary on an x86_64 host requires **qemu-user-static** with binfmt_misc support so Docker can run arm64 containers:
+`scripts/build-release.sh` uses `Dockerfile` to build a release binary for the **current host architecture**.
+Protobuf is compiled from source inside the container, and the correct Zig binary is downloaded
+automatically for amd64 or arm64.
 
 ```bash
-# Gentoo
-sudo emerge app-emulation/qemu[static-user]
-# Verify
-ls /proc/sys/fs/binfmt_misc/qemu-aarch64
-```
-
-#### Generic build (`scripts/build-release.sh`)
-
-Uses `Dockerfile` for **both** architectures. This works on any machine with Docker and qemu,
-but the aarch64 build compiles protobuf from source under qemu emulation, which is very slow.
-
-```bash
-just release-generic
+just release
 # or directly:
 ./scripts/build-release.sh
 ```
 
-#### Native-optimized build (`scripts/build-release-native.sh`)
-
-For **Gentoo hosts with crossdev** installed. The x86_64 binary is compiled natively; the aarch64
-binary is built inside an arm64 Docker container that reuses the host's pre-built crossdev sysroot
-libraries, skipping protobuf compilation under qemu.
-
-```bash
-# One-time: install aarch64 dependencies into crossdev sysroot
-sudo aarch64-unknown-linux-gnu-emerge dev-libs/protobuf app-arch/bzip2
-
-just release-native
-# or directly:
-./scripts/build-release-native.sh
-```
-
-#### Dockerfiles
-
-| File | Used by | Description |
-|---|---|---|
-| `Dockerfile` | `build-release.sh` | Multi-arch Debian builder. Installs build tools, compiles protobuf from source, and downloads the correct Zig binary for the target architecture. |
-| `Dockerfile.aarch64` | `build-release-native.sh` | Arm64-only builder. Copies pre-built protobuf/upb libraries from the host's Gentoo crossdev sysroot (`/usr/aarch64-unknown-linux-gnu/`) instead of compiling under qemu. |
-
-Both scripts place artifacts in `release/` with `SHA256SUMS`.
+The artifact is placed in `release/` with `SHA256SUMS`.
 
 ## Usage
 
@@ -166,7 +127,7 @@ Options:
 - `-l`, `--list`: list partitions only
 - `-p`, `--partitions <csv>`: extract selected partitions
 - `-o`, `--output <dir>`: output directory
-- `-c`, `--concurrency <n>`: number of parallel partition workers, default `4`
+- `-c`, `--concurrency <n>`: number of parallel partition workers, default is half of logical CPU threads (`nproc / 2`)
 - `--dry-run`: simulate extraction progress without writing output (useful for testing progress UI or validating payload parseability)
 - `--color`: alias for `--color=always`
 - `--color=<mode>`: color mode, one of `auto`, `always`, `never`
