@@ -23,10 +23,12 @@ fn createNamedExecutable(
     name: []const u8,
     root_module: *std.Build.Module,
 ) *std.Build.Step.Compile {
-    return b.addExecutable(.{
+    const exe = b.addExecutable(.{
         .name = name,
         .root_module = root_module,
     });
+    exe.link_gc_sections = false;
+    return exe;
 }
 
 fn addRunStep(
