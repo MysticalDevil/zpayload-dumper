@@ -64,7 +64,7 @@ fn runScenario(
     var p = try app.payload.Payload.open(gpa, io, payload_path);
     defer p.deinit();
     try p.init();
-    try p.extractSelected(out_dir, partitions, c, &reporter, app.payload.Sink.noop);
+    try p.extractSelected(out_dir, partitions, c, &reporter, app.payload.Sink.noop, null, false);
     const end = std.Io.Timestamp.now(io, .real).toNanoseconds();
 
     const elapsed_ns = end - start;
