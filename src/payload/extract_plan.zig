@@ -12,6 +12,8 @@ pub const Operation = struct {
     blob_length: u64,
     expected_uncompressed: u64,
     extents: []const Extent,
+    src_extents: []const Extent,
+    src_length: u64,
     sha256: ?[]const u8,
 };
 
@@ -94,6 +96,39 @@ pub fn buildPlan(
                 extents = shrunk;
             }
 
+            // Build src_extents (for delta operations like SOURCE_COPY, SOURCE_BSDIFF)
+            const src_extent_count = ctx.srcExtentCount(partition_index, operation_index);
+            var src_extents = try aa.alloc(Extent, @max(src_extent_count, 1));
+            var src_merged_count: usize = 0;
+            var src_extent_idx: usize = 0;
+            while (src_extent_idx < src_extent_count) : (src_extent_idx += 1) {
+                const start_block = ctx.srcExtentStartBlock(partition_index, operation_index, src_extent_idx);
+                const num_blocks = ctx.srcExtentNumBlocks(partition_index, operation_index, src_extent_idx);
+                if (num_blocks == 0) continue;
+                const offset_bytes = try extent_writer.bytesForBlocks(start_block);
+                const length_bytes = try extent_writer.bytesForBlocks(num_blocks);
+                if (src_merged_count > 0 and offset_bytes == src_extents[src_merged_count - 1].offset_bytes + src_extents[src_merged_count - 1].length_bytes) {
+                    src_extents[src_merged_count - 1].num_blocks += num_blocks;
+                    src_extents[src_merged_count - 1].length_bytes += length_bytes;
+                } else {
+                    src_extents[src_merged_count] = .{
+                        .start_block = start_block,
+                        .num_blocks = num_blocks,
+                        .offset_bytes = offset_bytes,
+                        .length_bytes = length_bytes,
+                    };
+                    src_merged_count += 1;
+                }
+            }
+            if (src_merged_count < src_extent_count) {
+                const shrunk = try aa.alloc(Extent, src_merged_count);
+                @memcpy(shrunk, src_extents[0..src_merged_count]);
+                src_extents = shrunk;
+            } else if (src_extent_count == 0) {
+                src_extents = src_extents[0..0];
+            }
+            const src_length = ctx.srcLength(partition_index, operation_index);
+
             total_output_bytes = std.math.add(u64, total_output_bytes, expected_uncompressed) catch return error.IntegerOverflow;
 
             const sha256_raw = ctx.operationSha256(partition_index, operation_index);
@@ -105,6 +140,8 @@ pub fn buildPlan(
                 .blob_length = blob_len_u64,
                 .expected_uncompressed = expected_uncompressed,
                 .extents = extents,
+                .src_extents = src_extents,
+                .src_length = src_length,
                 .sha256 = sha256,
             };
         }
