@@ -100,6 +100,16 @@ docker run --rm -v .:/src zpayload-builder
 zig build
 ```
 
+### Delta Payload Support (Optional)
+
+To enable `SOURCE_BSDIFF` delta operations, build with the `-Dbsdiff` flag:
+
+```bash
+zig build -Dbsdiff
+```
+
+`SOURCE_COPY` delta operations are always enabled and do not require extra flags.
+
 ### Cross-Architecture Release Builds
 
 #### Release Build via Docker
@@ -130,6 +140,7 @@ Options:
 - `-p`, `--partitions <csv>`: extract selected partitions
 - `-o`, `--output <dir>`: output directory
 - `-c`, `--concurrency <n>`: number of parallel partition workers, default is half of logical CPU threads (`nproc / 2`)
+- `--old <dir>`: directory containing source partition images for delta payload extraction
 - `--dry-run`: simulate extraction progress without writing output (useful for testing progress UI or validating payload parseability)
 - `--color`: alias for `--color=always`
 - `--color=<mode>`: color mode, one of `auto`, `always`, `never`
@@ -172,6 +183,10 @@ zig build run -- -p boot,vendor -o out payload.bin
 zig build run -- payload.zip
 zig build run -- --dry-run -p boot,vendor payload.bin
 zig build run -- --dry-run payload.zip
+
+# Delta payload extraction (requires source images)
+zig build run -- --old old_images/ -o new_images/ incremental_payload.bin
+zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_payload.bin
 ```
 
 Progress:
@@ -235,7 +250,10 @@ zig build bench_pressure -- /path/to/payload.bin
   - `REPLACE_BZ`
   - `ZSTD`
   - `ZERO`
+  - `SOURCE_COPY` (delta — requires `--old`)
+  - `SOURCE_BSDIFF` (delta — requires `--old` and `-Dbsdiff`)
 - SHA-256 verification for operation data.
+- Source image SHA-256 verification for delta operations (`src_sha256_hash`).
 - Input:
   - raw `payload.bin`
   - `.zip` containing `payload.bin`

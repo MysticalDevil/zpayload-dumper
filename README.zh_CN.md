@@ -69,6 +69,16 @@ sudo emerge --ask dev-libs/protobuf app-arch/bzip2 net-libs/grpc
 zig build
 ```
 
+### 增量 OTA 支持（可选）
+
+要启用 `SOURCE_BSDIFF` 增量操作，编译时需加上 `-Dbsdiff` 标志：
+
+```bash
+zig build -Dbsdiff
+```
+
+`SOURCE_COPY` 增量操作始终可用，无需额外编译标志。
+
 编译完成后，可通过 `zig build run -- ...` 直接运行，或从安装前缀的 `bin/zpayload-dumper` 调用。
 
 ## 用法
@@ -91,6 +101,10 @@ zig build run -- payload.zip
 # 模拟提取（不实际写入，用于测试进度 UI）
 zig build run -- --dry-run -p boot,vendor payload.bin
 zig build run -- --dry-run payload.zip
+
+# 增量 OTA 提取（需要提供源分区镜像）
+zig build run -- --old old_images/ -o new_images/ incremental_payload.bin
+zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_payload.bin
 ```
 
 ### 选项
@@ -102,6 +116,7 @@ zig build run -- --dry-run payload.zip
 | `-l`, `--list` | 列出所有分区后退出 |
 | `-p`, `--partitions <csv>` | 只提取指定的分区（用逗号分隔） |
 | `-o`, `--output <dir>` | 输出目录（默认：`extracted_YYYYMMDD_HHMMSS`） |
+| `--old <dir>` | 源分区镜像目录（增量 OTA 提取必需） |
 | `-c`, `--concurrency <n>` | 并行工作线程数（默认：`nproc / 2`，逻辑线程数的一半） |
 | `--dry-run` | 模拟提取进度，不实际写入输出（用于测试进度 UI 或验证 payload 可解析性） |
 | `--color` | 等价于 `--color=always` |
@@ -244,7 +259,10 @@ zig build run -- -o tmp/smoke1_zip_out tests/data/generated/smoke1/ota_update.zi
   - `REPLACE_BZ` — Bzip2 压缩数据
   - `ZSTD` — Zstd 压缩数据
   - `ZERO` — 全零填充块
+  - `SOURCE_COPY` — 增量复制（需要提供 `--old`）
+  - `SOURCE_BSDIFF` — 增量 bsdiff 补丁（需要提供 `--old`，编译时加 `-Dbsdiff`）
 - 对操作数据进行 SHA-256 校验
+- 对增量操作的源镜像数据进行 SHA-256 校验（`src_sha256_hash`）
 - 输入支持：单独的 `payload.bin`，或包含 `payload.bin` 的 `.zip` 文件
 
 ## 参考
