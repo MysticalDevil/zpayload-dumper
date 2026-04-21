@@ -36,7 +36,8 @@ pub fn parseArgs(
             return .{ .help = options.color_mode };
         }
         if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
-            return .{ .version = {} };
+            options.version = true;
+            continue;
         }
 
         if (arg.len > 0 and arg[0] == '-') {
@@ -90,6 +91,16 @@ pub fn parseArgs(
                 options.concurrency = std.fmt.parseInt(i32, args[i], 10) catch return error.Usage;
                 continue;
             }
+            if (std.mem.startsWith(u8, arg, "--format=")) {
+                options.format = parseFormat(arg["--format=".len..]) orelse return error.Usage;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--format")) {
+                i += 1;
+                if (i >= args.len) return error.Usage;
+                options.format = parseFormat(args[i]) orelse return error.Usage;
+                continue;
+            }
             return error.Usage;
         }
 
@@ -98,6 +109,7 @@ pub fn parseArgs(
         has_input = true;
     }
 
+    if (options.version) return .{ .version = options.format };
     if (!has_input) return error.Usage;
     return .{ .run = options };
 }
@@ -174,6 +186,12 @@ fn parseColorMode(text: []const u8) ?types.ColorMode {
     if (std.mem.eql(u8, text, "auto")) return .auto;
     if (std.mem.eql(u8, text, "always")) return .always;
     if (std.mem.eql(u8, text, "never")) return .never;
+    return null;
+}
+
+fn parseFormat(text: []const u8) ?types.OutputFormat {
+    if (std.mem.eql(u8, text, "text")) return .text;
+    if (std.mem.eql(u8, text, "json")) return .json;
     return null;
 }
 

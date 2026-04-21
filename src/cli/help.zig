@@ -70,6 +70,8 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try writeAliasLine(writer, theme, Layout.continuation_indent, "--color", "", "Alias for ", "--color=always");
     try writeColorModeLine(writer, theme);
     try writeAliasLine(writer, theme, Layout.continuation_indent, "--no-color", "", "Alias for ", "--color=never");
+    try writeOptionLine(writer, theme, Layout.section_indent, "--format", " <mode>", "Output format", " (", "text, json");
+    try writeOptionLine(writer, theme, Layout.continuation_indent, "--format=json", "", "JSON output for machine parsing", null, null);
     try Layout.writeBlankLine(writer);
 
     try theme.write(writer, .section, "Environment");

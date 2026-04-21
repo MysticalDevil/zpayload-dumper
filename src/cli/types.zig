@@ -26,6 +26,11 @@ pub const ResolvedColors = struct {
     source: ColorSource,
 };
 
+pub const OutputFormat = enum {
+    text,
+    json,
+};
+
 pub const CliOptions = struct {
     allocator: std.mem.Allocator,
     list: bool = false,
@@ -36,6 +41,7 @@ pub const CliOptions = struct {
     concurrency: ?i32 = null,
     input: []u8,
     color_mode: ColorMode = .auto,
+    format: OutputFormat = .text,
 
     pub fn deinit(self: *CliOptions) void {
         if (self.partitions) |value| self.allocator.free(value);
@@ -46,6 +52,6 @@ pub const CliOptions = struct {
 
 pub const ParseResult = union(enum) {
     help: ColorMode,
-    version: void,
+    version: OutputFormat,
     run: CliOptions,
 };

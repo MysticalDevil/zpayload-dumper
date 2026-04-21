@@ -77,9 +77,12 @@ fn run(init: std.process.Init, main_stderr: *std.Io.Writer) Error!void {
             const colors = cli.parse.resolveColors(color_mode, terminal);
             cli.help.renderFull(&stdout.interface, colors.stdout) catch return error.IoFailure;
         },
-        .version => {
+        .version => |format| {
             const build_options = @import("build_options");
-            stdout.interface.print("{s}\n", .{build_options.version}) catch return error.IoFailure;
+            switch (format) {
+                .text => stdout.interface.print("{s}\n", .{build_options.version}) catch return error.IoFailure,
+                .json => stdout.interface.print("{{\"version\": \"{s}\", \"description\": \"Android payload.bin extractor\"}}\n", .{build_options.version}) catch return error.IoFailure,
+            }
         },
         .run => |options_value| {
             var options = options_value;

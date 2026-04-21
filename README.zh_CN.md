@@ -107,6 +107,7 @@ zig build
 | `--color` | 等价于 `--color=always` |
 | `--color=<mode>` | 颜色模式：`auto`、`always`、`never` |
 | `--no-color` | 等价于 `--color=never` |
+| `--format=<mode>` | 输出格式：`text`、`json`（影响 `--version` 和 `--list` 输出） |
 
 ### 错误处理
 
