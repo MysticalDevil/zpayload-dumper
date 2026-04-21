@@ -1,0 +1,38 @@
+# Native-optimized aarch64 builder (requires Gentoo crossdev aarch64 sysroot on host)
+#
+# This Dockerfile avoids compiling protobuf under qemu by copying pre-built
+# aarch64 libraries/headers from the host's Gentoo crossdev sysroot.
+# Assumes crossdev has already emerged dev-libs/protobuf and app-arch/bzip2
+# for aarch64-unknown-linux-gnu.
+#
+# Usage:
+#   docker build --network host --platform linux/arm64 -f Dockerfile.aarch64 -t zpayload-builder:aarch64 .
+
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    curl xz-utils ca-certificates \
+    libbz2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy protobuf/upb libraries and headers from Gentoo crossdev sysroot.
+# Host must have: sudo aarch64-unknown-linux-gnu-emerge dev-libs/protobuf app-arch/bzip2
+COPY /usr/aarch64-unknown-linux-gnu/usr/include/upb /usr/local/include/upb
+COPY /usr/aarch64-unknown-linux-gnu/usr/include/google /usr/local/include/google
+COPY /usr/aarch64-unknown-linux-gnu/usr/include/utf8_range /usr/local/include/utf8_range
+COPY /usr/aarch64-unknown-linux-gnu/usr/lib/libupb.a /usr/local/lib/
+COPY /usr/aarch64-unknown-linux-gnu/usr/lib/libutf8_range*.so* /usr/local/lib/
+COPY /usr/aarch64-unknown-linux-gnu/usr/lib/libabsl*.so* /usr/local/lib/
+RUN ldconfig
+
+# Install Zig 0.16.0 for aarch64
+RUN curl -L -o /tmp/zig.tar.xz https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz \
+    && tar -xf /tmp/zig.tar.xz -C /opt \
+    && ln -s /opt/zig-aarch64-linux-0.16.0/zig /usr/local/bin/zig \
+    && rm /tmp/zig.tar.xz
+
+WORKDIR /src
+
+CMD ["zig", "build", "-Doptimize=ReleaseFast"]

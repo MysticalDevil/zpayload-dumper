@@ -100,6 +100,36 @@ docker run --rm -v .:/src zpayload-builder
 zig build
 ```
 
+### Cross-Architecture Release Builds
+
+Two release scripts are provided. Choose the one that matches your host setup:
+
+| Script | x86_64 | aarch64 | Host Requirements | Speed |
+|---|---|---|---|---|
+| `scripts/build-release.sh` | Docker (`--platform linux/amd64`) | Docker (`--platform linux/arm64`) | Any machine with Docker | Slow for aarch64 (protobuf compiled under qemu) |
+| `scripts/build-release-native.sh` | Native `zig build` | Docker + Gentoo crossdev sysroot | Gentoo with `crossdev` + `aarch64-unknown-linux-gnu-emerge` | Fast for both |
+
+**Generic (any host)** — works everywhere, but aarch64 builds protobuf from source under qemu emulation (~30+ min):
+
+```bash
+just release-generic
+# or directly:
+./scripts/build-release.sh
+```
+
+**Native-optimized (Gentoo hosts)** — reuses the host's crossdev aarch64 sysroot to skip protobuf compilation under qemu:
+
+```bash
+# One-time: install aarch64 dependencies into crossdev sysroot
+sudo aarch64-unknown-linux-gnu-emerge dev-libs/protobuf app-arch/bzip2
+
+just release-native
+# or directly:
+./scripts/build-release-native.sh
+```
+
+Both scripts place artifacts in `release/` with `SHA256SUMS`.
+
 ## Usage
 
 ```bash

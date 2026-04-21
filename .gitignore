@@ -9,3 +9,4 @@ extracted_*
 .rumdl_cache/
 docker/
 .codex
+release/
