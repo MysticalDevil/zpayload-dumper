@@ -1,5 +1,6 @@
 const std = @import("std");
 const app = @import("zpayload");
+const build_options = @import("build_options");
 
 const default_bench_payload = app.fixtures.sample_payload_path;
 const startup_partitions = &[_][]const u8{ "boot", "vbmeta", "vendor_boot" };
@@ -9,7 +10,7 @@ const concurrencies = [_]usize{ 1, 2, 4, 8 };
 fn benchOutputDir(gpa: std.mem.Allocator, io: std.Io, scenario: []const u8, c: usize) ![]u8 {
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
-    return std.fmt.allocPrint(gpa, ".zig-cache/bench_pressure_{s}_c{d}_{d}", .{ scenario, c, nonce });
+    return std.fmt.allocPrint(gpa, "{s}/bench_pressure_{s}_c{d}_{d}", .{ build_options.local_cache_dir, scenario, c, nonce });
 }
 
 fn mibPerSec(bytes: u64, elapsed_ns: i128) u64 {

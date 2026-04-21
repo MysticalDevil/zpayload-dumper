@@ -1,5 +1,6 @@
 const std = @import("std");
 const app = @import("zpayload");
+const build_options = @import("build_options");
 
 const default_bench_payload = app.fixtures.sample_payload_path;
 const bench_partitions = &app.fixtures.selected_triplet;
@@ -7,7 +8,7 @@ const bench_partitions = &app.fixtures.selected_triplet;
 fn defaultOutputDir(gpa: std.mem.Allocator, io: std.Io) ![]u8 {
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
-    return std.fmt.allocPrint(gpa, ".zig-cache/bench_smoke_{d}", .{nonce});
+    return std.fmt.allocPrint(gpa, "{s}/bench_smoke_{d}", .{ build_options.local_cache_dir, nonce });
 }
 
 fn mibPerSec(bytes: u64, elapsed_ns: i128) u64 {

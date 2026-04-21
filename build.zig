@@ -94,9 +94,14 @@ pub fn build(b: *std.Build) void {
         const zon = @import("build.zig.zon");
         break :blk b.allocator.dupe(u8, zon.version) catch "dev-unknown";
     };
+    const local_cache_dir = blk: {
+        if (b.cache_root.path) |path| break :blk b.allocator.dupe(u8, path) catch ".zig-cache";
+        break :blk ".zig-cache";
+    };
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", version_string);
+    build_options.addOption([]const u8, "local_cache_dir", local_cache_dir);
 
     const protoc = b.addSystemCommand(&.{"protoc"});
     const upb_out = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
@@ -150,16 +155,19 @@ pub fn build(b: *std.Build) void {
     stress_step.dependOn(&run_stress.step);
 
     const e2e_module = createRootModule(b, options, "tests/e2e_test.zig");
+    e2e_module.addOptions("build_options", build_options);
     attachIntegrationImport(e2e_module, zpayload_mod);
     const e2e_exe = createNamedExecutable(b, "zpayload_e2e_test", e2e_module);
     addRunStep(b, "check_e2e", "Extract full payload and compare hashes with generated baseline", e2e_exe);
 
     const bench_module = createRootModule(b, options, "tests/smoke_benchmark.zig");
+    bench_module.addOptions("build_options", build_options);
     attachIntegrationImport(bench_module, zpayload_mod);
     const bench_exe = createNamedExecutable(b, "zpayload_smoke_benchmark", bench_module);
     addRunStep(b, "bench_smoke", "Run lightweight extraction benchmark", bench_exe);
 
     const pressure_bench_module = createRootModule(b, options, "tests/pressure_benchmark.zig");
+    pressure_bench_module.addOptions("build_options", build_options);
     attachIntegrationImport(pressure_bench_module, zpayload_mod);
     const pressure_bench_exe = createNamedExecutable(b, "zpayload_pressure_benchmark", pressure_bench_module);
     addRunStep(b, "bench_pressure", "Run pressure benchmark matrix", pressure_bench_exe);

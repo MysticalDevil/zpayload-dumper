@@ -1,5 +1,6 @@
 const std = @import("std");
 const app = @import("zpayload");
+const build_options = @import("build_options");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
@@ -12,7 +13,7 @@ pub fn main(init: std.process.Init) !void {
 
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
-    const output_dir = try std.fmt.allocPrint(gpa, ".zig-cache/e2e_out_{d}", .{nonce});
+    const output_dir = try std.fmt.allocPrint(gpa, "{s}/e2e_out_{d}", .{ build_options.local_cache_dir, nonce });
     defer gpa.free(output_dir);
     defer std.Io.Dir.cwd().deleteTree(io, output_dir) catch |cleanup_err| {
         std.debug.panic("failed to cleanup output dir '{s}': {}", .{ output_dir, cleanup_err });
