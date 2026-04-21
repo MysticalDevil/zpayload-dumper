@@ -30,5 +30,5 @@ RUN ARCH=$(dpkg --print-architecture) \
     && rm /tmp/zig.tar.xz
 
 WORKDIR /src
-
-CMD ["zig", "build"]
+COPY . /src/
+RUN zig build -Doptimize=ReleaseFast

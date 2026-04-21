@@ -12,3 +12,4 @@ docker/
 release/
 zig-pkg/
 run_bench_matrix.sh
+.docker/

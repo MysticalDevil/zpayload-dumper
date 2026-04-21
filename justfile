@@ -22,11 +22,8 @@ bench_smoke:
 bench_pressure:
     zig build bench_pressure
 
-release-generic:
+release:
     ./scripts/build-release.sh
-
-release-native:
-    ./scripts/build-release-native.sh
 
 clean:
     rm -rf .zig-cache zig-out tests/data/generated release
