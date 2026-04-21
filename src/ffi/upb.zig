@@ -8,8 +8,12 @@ pub const Error = errors.AppError;
 pub const OperationType = enum(i32) {
     replace = 0,
     replace_bz = 1,
+    source_copy = 4,
+    source_bsdiff = 5,
     zero = 6,
     replace_xz = 8,
+    puffdiff = 9,
+    brotli_bsdiff = 10,
     zstd = 14,
     _,
 };
@@ -77,6 +81,22 @@ pub const Context = struct {
 
     pub fn dstExtentNumBlocks(self: Context, partition_index: usize, operation_index: usize, extent_index: usize) u64 {
         return c.zp_dst_extent_num_blocks(self.raw, partition_index, operation_index, extent_index);
+    }
+
+    pub fn srcExtentCount(self: Context, partition_index: usize, operation_index: usize) usize {
+        return c.zp_src_extent_count(self.raw, partition_index, operation_index);
+    }
+
+    pub fn srcExtentStartBlock(self: Context, partition_index: usize, operation_index: usize, extent_index: usize) u64 {
+        return c.zp_src_extent_start_block(self.raw, partition_index, operation_index, extent_index);
+    }
+
+    pub fn srcExtentNumBlocks(self: Context, partition_index: usize, operation_index: usize, extent_index: usize) u64 {
+        return c.zp_src_extent_num_blocks(self.raw, partition_index, operation_index, extent_index);
+    }
+
+    pub fn srcLength(self: Context, partition_index: usize, operation_index: usize) u64 {
+        return c.zp_src_length(self.raw, partition_index, operation_index);
     }
 };
 

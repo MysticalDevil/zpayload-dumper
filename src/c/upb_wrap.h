@@ -23,4 +23,9 @@ size_t zp_dst_extent_count(const zp_ctx* ctx, size_t partition_index, size_t ope
 uint64_t zp_dst_extent_start_block(const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index);
 uint64_t zp_dst_extent_num_blocks(const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index);
 
+size_t zp_src_extent_count(const zp_ctx* ctx, size_t partition_index, size_t operation_index);
+uint64_t zp_src_extent_start_block(const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index);
+uint64_t zp_src_extent_num_blocks(const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index);
+uint64_t zp_src_length(const zp_ctx* ctx, size_t partition_index, size_t operation_index);
+
 #endif

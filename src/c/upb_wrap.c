@@ -41,6 +41,17 @@ static const chromeos_update_engine_Extent* zp_get_dst_extent(
   return extents[extent_index];
 }
 
+static const chromeos_update_engine_Extent* zp_get_src_extent(
+    const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index) {
+  const chromeos_update_engine_InstallOperation* op = zp_get_operation(ctx, partition_index, operation_index);
+  if (!op) return NULL;
+  size_t n = 0;
+  const chromeos_update_engine_Extent* const* extents =
+      chromeos_update_engine_InstallOperation_src_extents(op, &n);
+  if (extent_index >= n || !extents) return NULL;
+  return extents[extent_index];
+}
+
 zp_ctx* zp_ctx_new(const uint8_t* manifest, size_t manifest_len, const uint8_t* signature, size_t signature_len) {
   upb_Arena* arena = upb_Arena_New();
   if (!arena) return NULL;
@@ -163,4 +174,34 @@ uint64_t zp_dst_extent_num_blocks(
       zp_get_dst_extent(ctx, partition_index, operation_index, extent_index);
   if (!extent) return 0;
   return chromeos_update_engine_Extent_num_blocks(extent);
+}
+
+size_t zp_src_extent_count(const zp_ctx* ctx, size_t partition_index, size_t operation_index) {
+  const chromeos_update_engine_InstallOperation* op = zp_get_operation(ctx, partition_index, operation_index);
+  if (!op) return 0;
+  size_t n = 0;
+  (void)chromeos_update_engine_InstallOperation_src_extents(op, &n);
+  return n;
+}
+
+uint64_t zp_src_extent_start_block(
+    const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index) {
+  const chromeos_update_engine_Extent* extent =
+      zp_get_src_extent(ctx, partition_index, operation_index, extent_index);
+  if (!extent) return 0;
+  return chromeos_update_engine_Extent_start_block(extent);
+}
+
+uint64_t zp_src_extent_num_blocks(
+    const zp_ctx* ctx, size_t partition_index, size_t operation_index, size_t extent_index) {
+  const chromeos_update_engine_Extent* extent =
+      zp_get_src_extent(ctx, partition_index, operation_index, extent_index);
+  if (!extent) return 0;
+  return chromeos_update_engine_Extent_num_blocks(extent);
+}
+
+uint64_t zp_src_length(const zp_ctx* ctx, size_t partition_index, size_t operation_index) {
+  const chromeos_update_engine_InstallOperation* op = zp_get_operation(ctx, partition_index, operation_index);
+  if (!op) return 0;
+  return chromeos_update_engine_InstallOperation_src_length(op);
 }
