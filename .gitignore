@@ -10,3 +10,4 @@ extracted_*
 docker/
 .codex
 release/
+zig-pkg/

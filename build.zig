@@ -61,6 +61,7 @@ fn attachPayloadDeps(
     module.addIncludePath(upb_out);
     module.addIncludePath(minitable_out);
     module.addIncludePath(b.path("src/c"));
+    module.addIncludePath(b.path("third_party/utf8_range"));
     module.addCSourceFile(.{
         .file = upb_out.path(b, "update_metadata.upb.c"),
     });
@@ -69,6 +70,9 @@ fn attachPayloadDeps(
     });
     module.addCSourceFile(.{
         .file = b.path("src/c/upb_wrap.c"),
+    });
+    module.addCSourceFile(.{
+        .file = b.path("third_party/utf8_range/utf8_range.c"),
     });
 
     module.linkSystemLibrary("upb", .{});
