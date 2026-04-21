@@ -38,6 +38,7 @@ pub const CliOptions = struct {
     version: bool = false,
     partitions: ?[]u8 = null,
     output: ?[]u8 = null,
+    old_dir: ?[]u8 = null,
     concurrency: ?i32 = null,
     input: []u8,
     color_mode: ColorMode = .auto,
@@ -46,6 +47,7 @@ pub const CliOptions = struct {
     pub fn deinit(self: *CliOptions) void {
         if (self.partitions) |value| self.allocator.free(value);
         if (self.output) |value| self.allocator.free(value);
+        if (self.old_dir) |value| self.allocator.free(value);
         self.allocator.free(self.input);
     }
 };

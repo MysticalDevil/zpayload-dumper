@@ -16,6 +16,7 @@ pub fn run(
     options: *const types.CliOptions,
     ui: *const cli_ui.Ui,
     reporter: *const payload.Reporter,
+    bsdiff_enabled: bool,
 ) Error!void {
     const gpa = init.gpa;
     const io = init.io;
@@ -58,7 +59,7 @@ pub fn run(
         };
         defer dumper.deinit();
         try dumper.initFromMetadata(metadata.manifest, metadata.signature);
-        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_zip_input);
+        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_zip_input, bsdiff_enabled);
     } else {
         var effective_payload: []const u8 = options.input;
         const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
@@ -77,7 +78,7 @@ pub fn run(
         var dumper = try payload.Payload.open(gpa, io, effective_payload);
         defer dumper.deinit();
         try dumper.init();
-        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_zip_input);
+        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_zip_input, bsdiff_enabled);
     }
 }
 
@@ -88,6 +89,7 @@ fn runWithPayload(
     reporter: *const payload.Reporter,
     effective_concurrency: usize,
     is_zip_input: bool,
+    bsdiff_enabled: bool,
 ) Error!void {
     const gpa = dumper.allocator;
     const io = dumper.io;
@@ -145,17 +147,19 @@ fn runWithPayload(
             };
             ui.info(select_message) catch return error.IoFailure;
         }
+        const old_dir: ?[]const u8 = options.old_dir;
         if (options.dry_run) {
-            try dumper.extractSelectedDryRun(selected.items, effective_concurrency, reporter, render.sink);
+            try dumper.extractSelectedDryRun(selected.items, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
         } else {
-            try dumper.extractSelected(out_path, selected.items, effective_concurrency, reporter, render.sink);
+            try dumper.extractSelected(out_path, selected.items, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
         }
     } else {
+        const old_dir: ?[]const u8 = options.old_dir;
         ui.info(if (options.dry_run) "dry-run simulating all partitions" else "extracting all partitions") catch return error.IoFailure;
         if (options.dry_run) {
-            try dumper.extractSelectedDryRun(&.{}, effective_concurrency, reporter, render.sink);
+            try dumper.extractSelectedDryRun(&.{}, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
         } else {
-            try dumper.extractSelected(out_path, &.{}, effective_concurrency, reporter, render.sink);
+            try dumper.extractSelected(out_path, &.{}, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
         }
     }
 

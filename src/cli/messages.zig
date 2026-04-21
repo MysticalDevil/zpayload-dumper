@@ -13,6 +13,7 @@ pub fn userMessage(err: Error) []const u8 {
         error.DecodeFailed => "failed to decode protobuf manifest/signature",
         error.InvalidDstExtents => "invalid destination extents in operation",
         error.UnhandledOperationType => "unsupported payload operation type",
+        error.MissingOldImage => "source partition images required for delta payload",
         error.DecompressedSizeMismatch => "decompressed size mismatch",
         error.XzDecompressFailed => "xz decompression failed",
         error.Bzip2DecompressFailed => "bzip2 decompression failed",

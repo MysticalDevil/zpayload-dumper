@@ -28,6 +28,7 @@ pub fn parseArgs(
         allocator.free(options.input);
         if (options.partitions) |value| allocator.free(value);
         if (options.output) |value| allocator.free(value);
+        if (options.old_dir) |value| allocator.free(value);
     };
 
     while (i < args.len) : (i += 1) {
@@ -79,6 +80,16 @@ pub fn parseArgs(
                 i += 1;
                 if (i >= args.len) return error.Usage;
                 try replaceOwned(allocator, &options.output, args[i]);
+                continue;
+            }
+            if (std.mem.startsWith(u8, arg, "--old=")) {
+                try replaceOwned(allocator, &options.old_dir, arg["--old=".len..]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--old")) {
+                i += 1;
+                if (i >= args.len) return error.Usage;
+                try replaceOwned(allocator, &options.old_dir, args[i]);
                 continue;
             }
             if (std.mem.startsWith(u8, arg, "--concurrency=")) {
