@@ -124,6 +124,8 @@ The artifact is placed in `release/` with `SHA256SUMS`.
 
 Options:
 
+- `-h`, `--help`: show full help and exit
+- `-v`, `--version`: show version and exit
 - `-l`, `--list`: list partitions only
 - `-p`, `--partitions <csv>`: extract selected partitions
 - `-o`, `--output <dir>`: output directory
@@ -135,6 +137,11 @@ Options:
 
 If `-o` is omitted, the default output directory is generated as local time:
 `extracted_YYYYMMDD_HHMMSS`.
+
+Error handling:
+
+- Unsupported arguments or missing input print a brief colored usage message and exit with code `2`.
+- `--help` and `--version` exit with code `0`.
 
 Color precedence:
 

@@ -59,7 +59,8 @@ fn run(init: std.process.Init) Error!void {
         },
         .version => {
             const build_options = @import("build_options");
-            stdout.interface.print("{s}\n", .{build_options.version}) catch return error.IoFailure;
+            stdout.interface.print("zpayload-dumper {s}\n", .{build_options.version}) catch return error.IoFailure;
+            stdout.interface.writeAll("Android payload.bin extractor\n") catch return error.IoFailure;
         },
         .run => |options_value| {
             var options = options_value;

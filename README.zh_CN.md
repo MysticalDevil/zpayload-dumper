@@ -97,6 +97,8 @@ zig build
 
 | 选项 | 说明 |
 |------|------|
+| `-h`, `--help` | 显示完整帮助并退出 |
+| `-v`, `--version` | 显示版本号并退出 |
 | `-l`, `--list` | 列出所有分区后退出 |
 | `-p`, `--partitions <csv>` | 只提取指定的分区（用逗号分隔） |
 | `-o`, `--output <dir>` | 输出目录（默认：`extracted_YYYYMMDD_HHMMSS`） |
@@ -105,6 +107,11 @@ zig build
 | `--color` | 等价于 `--color=always` |
 | `--color=<mode>` | 颜色模式：`auto`、`always`、`never` |
 | `--no-color` | 等价于 `--color=never` |
+
+### 错误处理
+
+- 不支持的参数或缺少输入文件时，程序会输出简要的着色 usage 信息，并以退出码 `2` 结束。
+- `--help` 和 `--version` 以退出码 `0` 结束。
 
 ### 颜色与环境变量
 
