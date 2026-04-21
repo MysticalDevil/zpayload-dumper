@@ -35,6 +35,9 @@ pub fn parseArgs(
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             return .{ .help = options.color_mode };
         }
+        if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
+            return .{ .version = {} };
+        }
 
         if (arg.len > 0 and arg[0] == '-') {
             if (std.mem.eql(u8, arg, "--color")) {
@@ -121,12 +124,12 @@ pub fn resolveColors(mode: types.ColorMode, terminal: types.TerminalCapabilities
     };
 }
 
-const EnvColor = struct {
+pub const EnvColor = struct {
     mode: types.ColorMode,
     source: types.ColorSource,
 };
 
-fn resolveEnvColorMode(env_colors: EnvColors) EnvColor {
+pub fn resolveEnvColorMode(env_colors: EnvColors) EnvColor {
     if (env_colors.zpayload_color) |value| {
         if (parseColorMode(value)) |mode| {
             return .{

@@ -26,8 +26,8 @@ const Layout = struct {
     }
 };
 
-pub fn renderUsage(writer: *std.Io.Writer) !void {
-    const theme = Theme.init(false);
+pub fn renderUsage(writer: *std.Io.Writer, use_color: bool) !void {
+    const theme = Theme.init(use_color);
     try theme.write(writer, .usage_hint, "Usage:");
     try writer.writeAll(" zpayload-dumper [options] ");
     try theme.write(writer, .placeholder, "<payload.bin|ota.zip>");
@@ -61,6 +61,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try theme.write(writer, .section, "Options");
     try writer.writeByte('\n');
     try writeOptionLine(writer, theme, Layout.section_indent, "-h, --help", "", "Show this help", null, null);
+    try writeOptionLine(writer, theme, Layout.section_indent, "-v, --version", "", "Show version", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-l, --list", "", "Show partition list only", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "--dry-run", "", "Simulate extraction progress without writing output", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-p, --partitions", " <csv>", "Extract selected partitions", null, null);

@@ -30,6 +30,7 @@ pub const CliOptions = struct {
     allocator: std.mem.Allocator,
     list: bool = false,
     dry_run: bool = false,
+    version: bool = false,
     partitions: ?[]u8 = null,
     output: ?[]u8 = null,
     concurrency: ?i32 = null,
@@ -45,5 +46,6 @@ pub const CliOptions = struct {
 
 pub const ParseResult = union(enum) {
     help: ColorMode,
+    version: void,
     run: CliOptions,
 };

@@ -88,6 +88,16 @@ pub fn build(b: *std.Build) void {
         .optimize = b.standardOptimizeOption(.{}),
     };
 
+    const version_opt = b.option([]const u8, "version", "Override version string (default: from build.zig.zon)");
+    const version_string = blk: {
+        if (version_opt) |v| break :blk v;
+        const zon = @import("build.zig.zon");
+        break :blk b.allocator.dupe(u8, zon.version) catch "dev-unknown";
+    };
+
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", version_string);
+
     const protoc = b.addSystemCommand(&.{"protoc"});
     const upb_out = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
     const minitable_out = protoc.addPrefixedOutputDirectoryArg("--upb_minitable_out=", "proto_minitable");
@@ -106,6 +116,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const root_module = createRootModule(b, options, "src/main.zig");
+    root_module.addOptions("build_options", build_options);
     attachPayloadDeps(b, root_module, upb_out, minitable_out);
 
     const zpayload_mod = createRootModule(b, options, "src/root.zig");

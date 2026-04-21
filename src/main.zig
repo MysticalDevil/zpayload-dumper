@@ -30,6 +30,11 @@ fn run(init: std.process.Init) Error!void {
     var stderr = stderr_file.writer(io, &.{});
     var stdout = stdout_file.writer(io, &.{});
 
+    const terminal = cli.types.TerminalCapabilities{
+        .stdout_is_tty = stdout_file.isTty(io) catch false,
+        .stderr_is_tty = stderr_file.isTty(io) catch false,
+    };
+
     const argv = init.minimal.args.toSlice(arena) catch return error.IoFailure;
     const env_colors = cli.parse.EnvColors{
         .zpayload_color = init.environ_map.get("ZPAYLOAD_COLOR"),
@@ -39,20 +44,22 @@ fn run(init: std.process.Init) Error!void {
     };
     const parse_result = cli.parse.parseArgs(gpa, env_colors, argv) catch |err| switch (err) {
         error.Usage => {
-            cli.help.renderUsage(&stderr.interface) catch return error.IoFailure;
+            const env_color = cli.parse.resolveEnvColorMode(env_colors);
+            const help_colors = cli.parse.resolveColors(env_color.mode, terminal);
+            cli.help.renderUsage(&stdout.interface, help_colors.stdout) catch return error.IoFailure;
             return error.Usage;
         },
         else => return err,
-    };
-    const terminal = cli.types.TerminalCapabilities{
-        .stdout_is_tty = stdout_file.isTty(io) catch false,
-        .stderr_is_tty = stderr_file.isTty(io) catch false,
     };
 
     switch (parse_result) {
         .help => |color_mode| {
             const colors = cli.parse.resolveColors(color_mode, terminal);
             cli.help.renderFull(&stdout.interface, colors.stdout) catch return error.IoFailure;
+        },
+        .version => {
+            const build_options = @import("build_options");
+            stdout.interface.print("{s}\n", .{build_options.version}) catch return error.IoFailure;
         },
         .run => |options_value| {
             var options = options_value;
@@ -67,7 +74,8 @@ fn run(init: std.process.Init) Error!void {
             };
             cli.runner.run(init, &options, &ui, &reporter) catch |err| switch (err) {
                 error.Usage => {
-                    cli.help.renderUsage(&stderr.interface) catch return error.IoFailure;
+                    const help_colors = cli.parse.resolveColors(options.color_mode, terminal);
+                    cli.help.renderUsage(&stdout.interface, help_colors.stdout) catch return error.IoFailure;
                     return error.Usage;
                 },
                 else => return err,
