@@ -1,0 +1,14 @@
+[project]
+name = "zpayload-dumper-scripts"
+version = "0.1.0"
+description = "Helper scripts for zpayload-dumper"
+requires-python = ">=3.10"
+dependencies = [
+    "bsdiff4>=1.2.0",
+    "protobuf>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
