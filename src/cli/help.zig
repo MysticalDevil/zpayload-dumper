@@ -65,7 +65,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try writeOptionLine(writer, theme, Layout.section_indent, "--dry-run", "", "Simulate extraction progress without writing output", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-p, --partitions", " <csv>", "Extract selected partitions", null, null);
     try writeOptionLine(writer, theme, Layout.section_indent, "-o, --output", " <dir>", "Output directory", null, null);
-    try writeOptionLine(writer, theme, Layout.section_indent, "-c, --concurrency", " <n>", "Number of parallel partition workers", " (default: ", "4");
+    try writeOptionLine(writer, theme, Layout.section_indent, "-c, --concurrency", " <n>", "Number of parallel partition workers", " (default: ", "nproc/2");
     try writeAliasLine(writer, theme, Layout.continuation_indent, "--color", "", "Alias for ", "--color=always");
     try writeColorModeLine(writer, theme);
     try writeAliasLine(writer, theme, Layout.continuation_indent, "--no-color", "", "Alias for ", "--color=never");

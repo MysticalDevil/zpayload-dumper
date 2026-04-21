@@ -32,7 +32,7 @@ pub const CliOptions = struct {
     dry_run: bool = false,
     partitions: ?[]u8 = null,
     output: ?[]u8 = null,
-    concurrency: i32 = 4,
+    concurrency: ?i32 = null,
     input: []u8,
     color_mode: ColorMode = .auto,
 

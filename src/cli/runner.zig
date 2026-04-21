@@ -20,9 +20,14 @@ pub fn run(
     const gpa = init.gpa;
     const io = init.io;
 
-    if (options.concurrency < 1) {
-        return error.InvalidConcurrency;
-    }
+    const effective_concurrency = blk: {
+        if (options.concurrency) |value| {
+            if (value < 1) return error.InvalidConcurrency;
+            break :blk @as(usize, @intCast(value));
+        }
+        const cpu_count = std.Thread.getCpuCount() catch 1;
+        break :blk @max(1, cpu_count / 2);
+    };
 
     var cleanup_tmp_dir: ?[]u8 = null;
     var cleanup_payload_path: ?[]u8 = null;
@@ -101,7 +106,7 @@ pub fn run(
 
     {
         var workers_buffer: [96]u8 = undefined;
-        const workers_message = std.fmt.bufPrint(&workers_buffer, "workers: {d}", .{options.concurrency}) catch return error.IoFailure;
+        const workers_message = std.fmt.bufPrint(&workers_buffer, "workers: {d}", .{effective_concurrency}) catch return error.IoFailure;
         ui.info(workers_message) catch return error.IoFailure;
     }
 
@@ -121,16 +126,16 @@ pub fn run(
             ui.info(select_message) catch return error.IoFailure;
         }
         if (options.dry_run) {
-            try dumper.extractSelectedDryRun(selected.items, @intCast(options.concurrency), reporter, render.sink);
+            try dumper.extractSelectedDryRun(selected.items, effective_concurrency, reporter, render.sink);
         } else {
-            try dumper.extractSelected(out_path, selected.items, @intCast(options.concurrency), reporter, render.sink);
+            try dumper.extractSelected(out_path, selected.items, effective_concurrency, reporter, render.sink);
         }
     } else {
         ui.info(if (options.dry_run) "dry-run simulating all partitions" else "extracting all partitions") catch return error.IoFailure;
         if (options.dry_run) {
-            try dumper.extractSelectedDryRun(&.{}, @intCast(options.concurrency), reporter, render.sink);
+            try dumper.extractSelectedDryRun(&.{}, effective_concurrency, reporter, render.sink);
         } else {
-            try dumper.extractSelected(out_path, &.{}, @intCast(options.concurrency), reporter, render.sink);
+            try dumper.extractSelected(out_path, &.{}, effective_concurrency, reporter, render.sink);
         }
     }
 
