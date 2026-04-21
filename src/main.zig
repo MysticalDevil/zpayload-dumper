@@ -80,7 +80,7 @@ fn run(init: std.process.Init, main_stderr: *std.Io.Writer) Error!void {
         .version => |format| {
             const build_options = @import("build_options");
             switch (format) {
-                .text => stdout.interface.print("{s}\n", .{build_options.version}) catch return error.IoFailure,
+                .text => stdout.interface.print("zpayload-dumper v{s} - Android payload.bin extractor\n", .{build_options.version}) catch return error.IoFailure,
                 .json => stdout.interface.print("{{\"version\": \"{s}\", \"description\": \"Android payload.bin extractor\"}}\n", .{build_options.version}) catch return error.IoFailure,
             }
         },
