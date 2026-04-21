@@ -115,6 +115,16 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try writer.writeAll("zip input is supported when ");
     try theme.write(writer, .literal, "payload.bin");
     try writer.writeAll(" exists inside the archive\n");
+    try Layout.writeBlankLine(writer);
+
+    try theme.write(writer, .section, "Exit Codes");
+    try writer.writeByte('\n');
+    try Layout.writeSectionIndent(writer);
+    try writer.writeAll("0  Success\n");
+    try Layout.writeSectionIndent(writer);
+    try writer.writeAll("1  Runtime error (I/O, payload decode, disk space, etc.)\n");
+    try Layout.writeSectionIndent(writer);
+    try writer.writeAll("2  Usage error (invalid arguments, missing input)\n");
 }
 
 fn writeOptionLine(

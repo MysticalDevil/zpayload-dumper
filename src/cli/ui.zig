@@ -21,15 +21,15 @@ pub const Ui = struct {
     }
 
     pub fn info(self: *const Ui, message: []const u8) !void {
-        try writeTagged(self.stdout, self.colors.stdout, .info_tag, message);
+        try writeTagged(self.stderr, self.colors.stderr, .info_tag, message);
     }
 
     pub fn success(self: *const Ui, message: []const u8) !void {
-        try writeTagged(self.stdout, self.colors.stdout, .success_tag, message);
+        try writeTagged(self.stderr, self.colors.stderr, .success_tag, message);
     }
 
     pub fn warn(self: *const Ui, message: []const u8) !void {
-        try writeTagged(self.stdout, self.colors.stdout, .warn_tag, message);
+        try writeTagged(self.stderr, self.colors.stderr, .warn_tag, message);
     }
 
     pub fn fail(self: *const Ui, message: []const u8) !void {

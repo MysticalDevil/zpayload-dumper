@@ -6,30 +6,50 @@ const payload = app.payload;
 
 const Error = errors.AppError;
 
+fn suggestionForError(err: Error) ?[]const u8 {
+    return switch (err) {
+        error.InvalidConcurrency => "zpayload-dumper --help",
+        error.InvalidZipArchive => "verify the file is a valid zip archive",
+        error.PayloadNotFoundInZip => "ensure the zip archive contains payload.bin",
+        error.InvalidMagic => "ensure the file is a valid payload.bin (expected CrAU header)",
+        error.UnsupportedPayloadVersion => "ensure the payload uses version 2",
+        error.InsufficientDiskSpace => "specify a different output directory with -o or free up disk space",
+        error.IoFailure => "verify the file path is correct and the file is readable",
+        error.OutOfMemory => "close other applications or reduce concurrency with -c",
+        error.TimeUnavailable => "check system clock configuration",
+        error.DecodeFailed => "ensure the payload.bin is not corrupted",
+        error.ChecksumMismatch => "the payload may be corrupted, try re-downloading",
+        else => "zpayload-dumper --help for usage information",
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
-    run(init) catch |err| switch (err) {
+    const io = init.io;
+    var stderr_file = std.Io.File.stderr();
+    var stderr = stderr_file.writer(io, &.{});
+
+    run(init, &stderr.interface) catch |err| switch (err) {
         error.Usage => std.process.exit(2),
         else => {
-            const io = init.io;
-            var stderr_file = std.Io.File.stderr();
-            var stderr = stderr_file.writer(io, &.{});
             const detail = errors.detail(err);
             stderr.interface.print("error[{s}]: {s}\n", .{ detail.stable_name, cli.messages.userMessage(err) }) catch std.process.exit(1);
+            if (suggestionForError(err)) |suggestion| {
+                stderr.interface.print("Try: {s}\n", .{suggestion}) catch std.process.exit(1);
+            }
             std.process.exit(1);
         },
     };
 }
 
-fn run(init: std.process.Init) Error!void {
+fn run(init: std.process.Init, main_stderr: *std.Io.Writer) Error!void {
     const gpa = init.gpa;
     const io = init.io;
     const arena = init.arena.allocator();
 
-    var stderr_file = std.Io.File.stderr();
     var stdout_file = std.Io.File.stdout();
-    var stderr = stderr_file.writer(io, &.{});
     var stdout = stdout_file.writer(io, &.{});
 
+    var stderr_file = std.Io.File.stderr();
     const terminal = cli.types.TerminalCapabilities{
         .stdout_is_tty = stdout_file.isTty(io) catch false,
         .stderr_is_tty = stderr_file.isTty(io) catch false,
@@ -59,17 +79,16 @@ fn run(init: std.process.Init) Error!void {
         },
         .version => {
             const build_options = @import("build_options");
-            stdout.interface.print("zpayload-dumper {s}\n", .{build_options.version}) catch return error.IoFailure;
-            stdout.interface.writeAll("Android payload.bin extractor\n") catch return error.IoFailure;
+            stdout.interface.print("{s}\n", .{build_options.version}) catch return error.IoFailure;
         },
         .run => |options_value| {
             var options = options_value;
             defer options.deinit();
             const colors = cli.parse.resolveColors(options.color_mode, terminal);
-            const ui = cli.ui.Ui.init(&stdout.interface, &stderr.interface, colors);
+            const ui = cli.ui.Ui.init(&stdout.interface, main_stderr, colors);
             const reporter = payload.Reporter{
                 .out = &stdout.interface,
-                .err = &stderr.interface,
+                .err = main_stderr,
                 .use_color = colors.stdout,
                 .dynamic = terminal.stdout_is_tty,
             };

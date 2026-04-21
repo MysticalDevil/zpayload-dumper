@@ -42,7 +42,6 @@ pub fn run(
     const is_zip_input = std.mem.endsWith(u8, options.input, zip_suffix);
     var effective_payload: []const u8 = options.input;
     var dumper: payload.Payload = undefined;
-    defer dumper.deinit();
 
     if (is_zip_input and options.dry_run) {
         ui.warn("zip input detected, reading payload metadata in memory for dry-run") catch return error.IoFailure;
@@ -53,6 +52,7 @@ pub fn run(
             .allocator = gpa,
             .io = io,
         };
+        defer dumper.deinit();
         try dumper.initFromMetadata(metadata.manifest, metadata.signature);
     } else {
         const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
@@ -69,6 +69,7 @@ pub fn run(
 
         try logPath(ui, "input: {s}", effective_payload);
         dumper = try payload.Payload.open(gpa, io, effective_payload);
+        defer dumper.deinit();
         try dumper.init();
     }
 
