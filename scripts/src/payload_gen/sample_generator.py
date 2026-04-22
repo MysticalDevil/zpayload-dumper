@@ -18,6 +18,7 @@ from payload_gen.payload_format import (
     build_payload_bytes,
     build_payload_properties,
     payload_metadata_blob,
+    write_ota_tar,
     write_ota_zip,
     write_payload_file,
 )
@@ -412,6 +413,8 @@ def apply_scenario(base: SampleArtifacts, scenario: str) -> SampleArtifacts:
 def write_sample_bundle(sample_root: Path, artifacts: SampleArtifacts, scenario: str, seed: int) -> None:
     payload_path = sample_root / "payload.bin"
     ota_zip_path = sample_root / "ota_update.zip"
+    ota_tar_path = sample_root / "ota_update.tar"
+    ota_tgz_path = sample_root / "ota_update.tar.gz"
     extracted_dir = sample_root / "extracted"
     manifest_txt_path = sample_root / "manifest.textproto"
     scenario_txt_path = sample_root / "scenario.txt"
@@ -428,6 +431,20 @@ def write_sample_bundle(sample_root: Path, artifacts: SampleArtifacts, scenario:
         payload_bytes=artifacts.ota_payload_bytes,
         payload_properties=artifacts.ota_payload_properties,
         include_payload=artifacts.ota_has_payload,
+    )
+    write_ota_tar(
+        ota_tar_path,
+        payload_bytes=artifacts.ota_payload_bytes,
+        payload_properties=artifacts.ota_payload_properties,
+        include_payload=artifacts.ota_has_payload,
+        compress=False,
+    )
+    write_ota_tar(
+        ota_tgz_path,
+        payload_bytes=artifacts.ota_payload_bytes,
+        payload_properties=artifacts.ota_payload_properties,
+        include_payload=artifacts.ota_has_payload,
+        compress=True,
     )
 
     for spec in artifacts.specs:
@@ -446,6 +463,8 @@ def write_sample_bundle(sample_root: Path, artifacts: SampleArtifacts, scenario:
 
     print(f"[OK] generated payload: {payload_path}")
     print(f"[OK] generated ota zip: {ota_zip_path}")
+    print(f"[OK] generated ota tar: {ota_tar_path}")
+    print(f"[OK] generated ota tgz: {ota_tgz_path}")
     print(f"[OK] generated golden dir: {extracted_dir}")
     print(f"[INFO] scenario: {scenario}")
     print(f"[INFO] expected: {expected_txt_path.read_text().strip()}")

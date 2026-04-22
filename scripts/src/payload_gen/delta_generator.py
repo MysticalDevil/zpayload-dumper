@@ -15,6 +15,7 @@ from payload_gen.payload_format import (
     build_payload_bytes,
     build_payload_properties,
     payload_metadata_blob,
+    write_ota_tar,
     write_ota_zip,
     write_payload_file,
 )
@@ -92,6 +93,8 @@ def write_fixture_bundle(
 
     payload_path = bundle_dir / "payload.bin"
     ota_zip_path = bundle_dir / "ota_update.zip"
+    ota_tar_path = bundle_dir / "ota_update.tar"
+    ota_tgz_path = bundle_dir / "ota_update.tar.gz"
     manifest_path = bundle_dir / "manifest.textproto"
     expected_path = bundle_dir / "expected_result.txt"
     scenario_path = bundle_dir / "scenario.txt"
@@ -102,6 +105,20 @@ def write_fixture_bundle(
         payload_bytes=payload_bytes,
         payload_properties=payload_properties,
         include_payload=True,
+    )
+    write_ota_tar(
+        ota_tar_path,
+        payload_bytes=payload_bytes,
+        payload_properties=payload_properties,
+        include_payload=True,
+        compress=False,
+    )
+    write_ota_tar(
+        ota_tgz_path,
+        payload_bytes=payload_bytes,
+        payload_properties=payload_properties,
+        include_payload=True,
+        compress=True,
     )
     manifest_path.write_text(manifest_text)
     (old_dir / f"{partition_name}.img").write_bytes(old_data)
@@ -119,6 +136,9 @@ def write_fixture_bundle(
     )
 
     print(f"[OK] fixture bundle written to {bundle_dir}")
+    print(f"[OK] generated ota zip: {ota_zip_path}")
+    print(f"[OK] generated ota tar: {ota_tar_path}")
+    print(f"[OK] generated ota tgz: {ota_tgz_path}")
     print(f"[INFO] old images: {old_dir}")
     print(f"[INFO] expected extracted images: {extracted_dir}")
 
