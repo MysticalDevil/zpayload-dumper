@@ -21,6 +21,11 @@ pub const PayloadMetadata = struct {
     }
 };
 
+const FileExtents = struct {
+    uncompressed_size: u64,
+    compressed_size: u64,
+};
+
 pub fn cleanupExtractedPayloadTempDir(io: std.Io, path: []const u8) Error!void {
     if (std.fs.path.isAbsolute(path)) {
         const parent_path = std.fs.path.dirname(path) orelse return error.IoFailure;
@@ -142,7 +147,40 @@ fn readEntryPrefixAlloc(
     try fr.seekTo(entry.file_offset);
     const local_header = try fr.interface.takeStruct(std.zip.LocalFileHeader, .little);
     if (!std.mem.eql(u8, &local_header.signature, &std.zip.local_file_header_sig)) return error.ZipBadFileOffset;
+    if (local_header.version_needed_to_extract != entry.version_needed_to_extract) return error.ZipMismatchVersionNeeded;
+    if (local_header.last_modification_time != entry.last_modification_time) return error.ZipMismatchModTime;
+    if (local_header.last_modification_date != entry.last_modification_date) return error.ZipMismatchModDate;
+    if (@as(u16, @bitCast(local_header.flags)) != @as(u16, @bitCast(entry.flags))) return error.ZipMismatchFlags;
+    if (local_header.crc32 != 0 and local_header.crc32 != entry.crc32) return error.ZipMismatchCrc32;
     if (local_header.filename_len != entry.filename_len) return error.ZipMismatchFilenameLen;
+
+    var extents: FileExtents = .{
+        .uncompressed_size = local_header.uncompressed_size,
+        .compressed_size = local_header.compressed_size,
+    };
+    if (local_header.extra_len > 0) {
+        const extra = try allocator.alloc(u8, local_header.extra_len);
+        defer allocator.free(extra);
+
+        try fr.seekTo(entry.file_offset + @sizeOf(std.zip.LocalFileHeader) + local_header.filename_len);
+        fr.interface.readSliceAll(extra) catch return error.InvalidZipArchive;
+
+        var extra_offset: usize = 0;
+        while (extra_offset + 4 <= extra.len) {
+            const header_id = std.mem.readInt(u16, extra[extra_offset..][0..2], .little);
+            const data_size = std.mem.readInt(u16, extra[extra_offset..][2..4], .little);
+            const end = extra_offset + 4 + data_size;
+            if (end > extra.len) return error.ZipBadExtraFieldSize;
+            const data = extra[extra_offset + 4 .. end];
+            switch (@as(std.zip.ExtraHeader, @enumFromInt(header_id))) {
+                .zip64_info => try readZip64LocalExtents(local_header, &extents, data),
+                else => {},
+            }
+            extra_offset = end;
+        }
+    }
+    if (extents.compressed_size != 0 and extents.compressed_size != entry.compressed_size) return error.ZipMismatchCompLen;
+    if (extents.uncompressed_size != 0 and extents.uncompressed_size != entry.uncompressed_size) return error.ZipMismatchUncompLen;
 
     const local_data_file_offset =
         entry.file_offset +
@@ -173,6 +211,23 @@ fn readEntryPrefixAlloc(
     return bytes;
 }
 
+fn readZip64LocalExtents(
+    local_header: std.zip.LocalFileHeader,
+    extents: *FileExtents,
+    data: []const u8,
+) !void {
+    var data_offset: usize = 0;
+    if (local_header.uncompressed_size == std.math.maxInt(u32)) {
+        if (data_offset + 8 > data.len) return error.ZipBadCd64Size;
+        extents.uncompressed_size = std.mem.readInt(u64, data[data_offset..][0..8], .little);
+        data_offset += 8;
+    }
+    if (local_header.compressed_size == std.math.maxInt(u32)) {
+        if (data_offset + 8 > data.len) return error.ZipBadCd64Size;
+        extents.compressed_size = std.mem.readInt(u64, data[data_offset..][0..8], .little);
+    }
+}
+
 const TempBaseSelection = struct {
     base_path: []u8,
     is_absolute: bool,
@@ -195,7 +250,9 @@ fn attemptExtractPayloadEntry(
 
     createTempBaseIfNeeded(io, temp_base.base_path, temp_base.is_absolute) catch return error.IoFailure;
     createTempDir(io, dir_path, temp_base.is_absolute) catch return error.IoFailure;
-    errdefer cleanupExtractedPayloadTempDir(io, dir_path) catch {};
+    errdefer cleanupExtractedPayloadTempDir(io, dir_path) catch |cleanup_err| {
+        std.log.warn("failed to cleanup temporary extraction directory '{s}': {}", .{ dir_path, cleanup_err });
+    };
 
     const extract_err = extractEntryIntoDir(io, fr, entry, filename_buf, dir_path, temp_base.is_absolute);
     if (extract_err) |_| {} else |err| {
