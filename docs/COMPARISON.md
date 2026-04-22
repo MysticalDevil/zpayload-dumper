@@ -461,11 +461,11 @@ overhead and increases the risk of bugs.
 GOOS=windows GOARCH=amd64 go build
 
 # Zig: also excellent cross-compilation, but requires C library cross-compilation too
-zig build -Dtarget=x86_64-windows-gnu   # need Windows upb/utf8_range/bz2
+zig build -Dtarget=aarch64-linux-gnu   # need ARM64 upb/utf8_range/bz2
 ```
 
 Go's pure-Go dependencies make cross-compilation straightforward. Zig's C dependencies (`upb`, `utf8_range`, `bz2`) require either
-cross-compiled versions of those libraries or building them from source for the target.
+cross-compiled versions of those libraries or building them from source for the target. Windows cross-compilation is not supported on main.
 
 ### 10.6 Concurrency Model Clarity
 

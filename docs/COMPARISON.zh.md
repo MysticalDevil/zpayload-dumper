@@ -445,10 +445,10 @@ Zig 版本在多线程环境下手动管理内存，这很强大，但也增加�
 GOOS=windows GOARCH=amd64 go build
 
 # Zig：同样优秀的交叉编译，但也需要 C 库的交叉编译
-zig build -Dtarget=x86_64-windows-gnu   # 需要 Windows 版 upb/utf8_range/bz2
+zig build -Dtarget=aarch64-linux-gnu   # 需要 ARM64 版 upb/utf8_range/bz2
 ```
 
-Go 的纯 Go 依赖使交叉编译非常顺畅。Zig 的 C 依赖（`upb`、`bz2` 等）需要这些库的交叉编译版本，或为目标平台从源码构建。
+Go 的纯 Go 依赖使交叉编译非常顺畅。Zig 的 C 依赖（`upb`、`utf8_range`、`bz2`）需要这些库的交叉编译版本，或为目标平台从源码构建。main 分支暂不支持 Windows 交叉编译。
 
 ### 10.6 并发模型清晰度
 
