@@ -4,7 +4,7 @@
 # Detects host architecture and builds natively (no qemu emulation).
 # Protobuf is compiled from source inside the container.
 #
-# Usage: ./scripts/build-release.sh
+# Usage: ./scripts/shell/build-release.sh
 
 set -euo pipefail
 

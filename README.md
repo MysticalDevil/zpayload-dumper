@@ -114,14 +114,14 @@ zig build -Dbsdiff
 
 #### Release Build via Docker
 
-`scripts/build-release.sh` uses `Dockerfile` to build a release binary for the **current host architecture**.
+`scripts/shell/build-release.sh` uses `Dockerfile` to build a release binary for the **current host architecture**.
 Protobuf is compiled from source inside the container, and the correct Zig binary is downloaded
 automatically for amd64 or arm64.
 
 ```bash
 just release
 # or directly:
-./scripts/build-release.sh
+./scripts/shell/build-release.sh
 ```
 
 The artifact is placed in `release/` with `SHA256SUMS`.
