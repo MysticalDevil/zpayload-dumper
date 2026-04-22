@@ -30,7 +30,7 @@ pub fn renderUsage(writer: *std.Io.Writer, use_color: bool) !void {
     const theme = Theme.init(use_color);
     try theme.write(writer, .usage_hint, "Usage:");
     try writer.writeAll(" zpayload-dumper [options] ");
-    try theme.write(writer, .placeholder, "<payload.bin|ota.zip>");
+    try theme.write(writer, .placeholder, "<payload.bin|ota.zip|ota.tar.gz>");
     try writer.writeByte('\n');
     try theme.write(writer, .usage_hint, "Try:");
     try writer.writeByte(' ');
@@ -54,7 +54,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try Layout.writeSectionIndent(writer);
     try theme.write(writer, .command, "zpayload-dumper");
     try writer.writeAll(" [options] ");
-    try theme.write(writer, .placeholder, "<payload.bin|ota.zip>");
+    try theme.write(writer, .placeholder, "<payload.bin|ota.zip|ota.tar.gz>");
     try Layout.writeBlankLine(writer);
     try Layout.writeBlankLine(writer);
 
@@ -91,6 +91,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try writeExampleLine(writer, theme, "zpayload-dumper -p boot,vendor -o out /path/to/payload.bin");
     try writeExampleLine(writer, theme, "zpayload-dumper --old old_images/ --output new_images/ /path/to/incremental.bin");
     try writeExampleLine(writer, theme, "zpayload-dumper --color=always /path/to/ota.zip");
+    try writeExampleLine(writer, theme, "zpayload-dumper /path/to/ota.tar.gz");
     try writeExampleLine(writer, theme, "ZPAYLOAD_COLOR=never zpayload-dumper /path/to/payload.bin");
     try Layout.writeBlankLine(writer);
 
@@ -116,7 +117,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try theme.write(writer, .context_value, "extracted_YYYYMMDD_HHMMSS");
     try writer.writeByte('\n');
     try Layout.writeSectionIndent(writer);
-    try writer.writeAll("zip input is supported when ");
+    try writer.writeAll("zip and tar.gz/tgz input is supported when ");
     try theme.write(writer, .literal, "payload.bin");
     try writer.writeAll(" exists inside the archive\n");
     try Layout.writeBlankLine(writer);

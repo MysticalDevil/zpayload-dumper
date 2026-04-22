@@ -208,7 +208,7 @@ If a future firmware (e.g., a Pixel device adopting `BROTLI_BSDIFF`) uses any of
 | OPPO / realme | **OZIP encrypted** | Standard after decrypt | ❌ (outer layer) |
 | Samsung | **tar.md5** | N/A | ❌ |
 | Huawei | **UPDATE.APP** | N/A | ❌ |
-| Xiaomi | **TGZ/TAR** | Usually standard | ✅ (payload only) |
+| Xiaomi | **TGZ/TAR** | Usually standard | ✅ (extracts payload.bin from tar/tar.gz/tgz) |
 | Motorola | **sparsechunk** | N/A | ❌ |
 | Sony | **FTF** | N/A | ❌ |
 | Delta OTA | Plain ZIP | SOURCE_COPY, BSDIFF, etc. | ❌ (by design) |

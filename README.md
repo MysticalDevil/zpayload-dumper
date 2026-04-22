@@ -262,6 +262,7 @@ zig build bench_pressure -- /path/to/payload.bin
 - Input:
   - raw `payload.bin`
   - `.zip` containing `payload.bin`
+  - `.tar`/`.tar.gz`/`.tgz` containing `payload.bin`
 
 > See [`docs/ODD_OTA_FORMATS.md`](docs/ODD_OTA_FORMATS.md) for a vendor-by-vendor breakdown
 > of non-standard OTA formats (vivo, OPPO, Samsung, Huawei, Xiaomi, Motorola, Sony)

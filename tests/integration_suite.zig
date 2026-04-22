@@ -171,9 +171,9 @@ test "zip input extraction path matches sample baseline" {
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
     const tmp_base = default_tmp_base;
-    const extracted = try app.zip_payload.extractPayloadBinFromZip(allocator, io, tmp_base, zip_path);
+    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, tmp_base, zip_path);
     defer {
-        app.zip_payload.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
+        app.input.payload_zip.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
             std.debug.panic("failed to cleanup temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });
         };
         allocator.free(extracted.temp_dir);
@@ -215,12 +215,12 @@ test "zip temp extraction cleanup removes extracted temp dir" {
     const zip_path = app.fixtures.sample_ota_zip_path;
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
-    const extracted = try app.zip_payload.extractPayloadBinFromZip(allocator, io, default_tmp_base, zip_path);
+    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, default_tmp_base, zip_path);
     defer allocator.free(extracted.temp_dir);
     defer allocator.free(extracted.payload_path);
 
     try std.testing.expect(app.fs_hash.fileExists(io, extracted.payload_path));
-    try app.zip_payload.cleanupExtractedPayloadTempDir(io, extracted.temp_dir);
+    try app.input.payload_zip.cleanupExtractedPayloadTempDir(io, extracted.temp_dir);
     try std.testing.expect(!app.fs_hash.fileExists(io, extracted.payload_path));
 }
 
@@ -232,9 +232,9 @@ test "zip extraction falls back to workspace tmp when preferred temp base is una
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
     const unavailable_tmp_base = "/definitely-missing-zpayload-temp-base";
-    const extracted = try app.zip_payload.extractPayloadBinFromZip(allocator, io, unavailable_tmp_base, zip_path);
+    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, unavailable_tmp_base, zip_path);
     defer {
-        app.zip_payload.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
+        app.input.payload_zip.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
             std.debug.panic("failed to cleanup fallback temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });
         };
         allocator.free(extracted.temp_dir);

@@ -205,7 +205,7 @@ OPPO 和 realme 的 OTA 文件扩展名为 `.ozip`，实质是 **AES-ECB 加密�
 | OPPO / realme | **OZIP 加密** | 解密后为标准格式 | ❌（外层问题） |
 | 三星 | **tar.md5** | 不适用 | ❌ |
 | 华为 | **UPDATE.APP** | 不适用 | ❌ |
-| 小米 | **TGZ/TAR** | 通常为 standard | ✅（仅 payload） |
+| 小米 | **TGZ/TAR** | 通常为 standard | ✅（可从 tar/tar.gz/tgz 中提取 payload.bin） |
 | 摩托罗拉 | **sparsechunk** | 不适用 | ❌ |
 | 索尼 | **FTF** | 不适用 | ❌ |
 | 增量 OTA | 普通 ZIP | SOURCE_COPY、BSDIFF 等 | ❌（设计上不支持） |
