@@ -171,9 +171,9 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 
 ## 开发
 
-Python 辅助工具位于 `scripts/`，现在是标准的 `uv` 管理工程。
-生成测试样本或运行 Python 辅助命令时，统一使用 `uv run --project scripts payload-gen ...`。
-详细说明见 [`scripts/README.zh.md`](scripts/README.zh.md)。
+`scripts/` 下包含一个独立的 Python 工具集，用于生成 Android OTA `payload.bin` 测试样本。它是标准的 `uv` 管理工程，可以独立于本提取器使用。
+
+完整用法见 [`scripts/README.zh.md`](scripts/README.zh.md)。
 
 ### 运行测试
 

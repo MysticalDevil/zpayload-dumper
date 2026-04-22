@@ -208,9 +208,9 @@ Progress:
 
 ## Test And Bench
 
-Python helper tooling lives under `scripts/` as a standard `uv`-managed project.
-Use `uv run --project scripts payload-gen ...` as the primary entrypoint for test sample generation and Python helper commands.
-Detailed generator documentation lives in [`scripts/README.md`](scripts/README.md).
+A standalone Python toolkit for generating Android OTA `payload.bin` test samples lives under `scripts/`. It is a standard `uv`-managed project and can be used independently of this dumper.
+
+See [`scripts/README.md`](scripts/README.md) for full usage.
 
 Tests:
 

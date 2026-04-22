@@ -1,7 +1,15 @@
-# Python 生成器
+# payload-gen
 
-仓库在 [`scripts/`](./) 下提供了一个由 `uv` 管理的 Python 工程，
-用于生成本地测试、CI 和回归测试所需的合成测试样本。
+一个用于生成合成 Android OTA `payload.bin` 测试样本的独立 Python 工具集。
+
+适用场景：
+
+- 测试 Android OTA payload 提取/转储工具
+- 生成可复现的回归测试固件
+- CI 流水线需要合法和非法的 payload 样本
+- 为提取工具性能测试提供受控输入
+
+该工具使用 [`uv`](https://docs.astral.sh/uv/) 管理，可以独立于任何具体的提取器实现使用。
 
 ## 环境准备
 
@@ -12,47 +20,31 @@
 - `protoc`
 - `zstd`
 
-同步辅助环境：
+安装依赖：
 
 ```bash
-uv sync --project scripts
+uv sync
 ```
 
-查看可用入口：
-
-```bash
-uv run --project scripts payload-gen --help
-```
-
-推荐使用统一入口：
-
-```bash
-uv run --project scripts payload-gen sample --name smoke1
-uv run --project scripts payload-gen delta --old old.img --new new.img --output /tmp/test_delta.bin
-```
-
-## 入口命令
+## 用法
 
 ### `payload-gen sample`
 
-生成合成 `payload.bin`、模拟 OTA zip，以及对应的预期输出解包目录。
-
-常见用法：
+生成合成 `payload.bin`、模拟 OTA zip，以及对应的预期输出镜像。
 
 ```bash
-uv run --project scripts payload-gen sample --name smoke1
-uv run --project scripts payload-gen sample --name bench128 --total-mb 128
-uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
-uv run --project scripts payload-gen sample --name matrix --scenario all --total-mb 32
+uv run payload-gen sample --name smoke1 --out-root ./output
+uv run payload-gen sample --name bench128 --total-mb 128 --out-root ./output
+uv run payload-gen sample --name bad-magic --scenario invalid_magic --out-root ./output
 ```
 
 参数说明：
 
-- `--out-root`：输出根目录，相对于仓库根目录。默认：`tests/data/generated`
-- `--name`：样本名。若使用 `--scenario all`，实际目录名会扩展成 `<name>-<scenario>`
-- `--seed`：固定随机种子，用于复现测试样本
-- `--total-mb`：合成分区总容量目标，用来控制样本规模
-- `--scenario`：要生成的场景。默认：`valid`
+- `--out-root`：输出目录。默认：`./generated`
+- `--name`：样本名
+- `--seed`：固定随机种子，用于复现
+- `--total-mb`：合成分区总容量目标
+- `--scenario`：样本场景。默认：`valid`
 - `--list-scenarios`：列出支持的场景后退出
 
 支持的场景：
@@ -60,16 +52,16 @@ uv run --project scripts payload-gen sample --name matrix --scenario all --total
 - `valid`：正常的 payload 和 OTA zip
 - `invalid_magic`：破坏 payload 头部 magic
 - `unsupported_version`：把 payload 版本从 `2` 改成 `3`
-- `truncated_payload`：在 metadata/data 之后截断 payload 文件
-- `checksum_mismatch`：破坏一个 operation blob 字节，但不更新 manifest 哈希
-- `invalid_partition_name`：在 manifest 中写入不安全的分区名，例如 `../evil_boot`
-- `missing_payload_in_zip`：OTA zip 是合法的，但里面没有 `payload.bin`
-- `corrupt_zip_payload`：磁盘上的 `payload.bin` 仍然合法，但 `ota_update.zip` 内嵌的副本被破坏
+- `truncated_payload`：在 metadata 之后截断 payload 文件
+- `checksum_mismatch`：破坏 operation blob 字节，但不更新 manifest 哈希
+- `invalid_partition_name`：写入不安全的分区名，例如 `../evil_boot`
+- `missing_payload_in_zip`：OTA zip 中不包含 `payload.bin`
+- `corrupt_zip_payload`：磁盘上的 `payload.bin` 合法，但 zip 内嵌副本被破坏
 
 输出结构：
 
 ```text
-tests/data/generated/<name>/
+<out-root>/<name>/
   payload.bin
   ota_update.zip
   manifest.textproto
@@ -79,35 +71,27 @@ tests/data/generated/<name>/
     *.img
 ```
 
-补充说明：
-
-- `expected_result.txt` 主要用于 Zig 程序的回归测试
-- `scenario.txt` 会记录场景名、描述、随机种子和附加说明
-- 该生成器既支持成功样本，也支持错误样本
-
 ### `payload-gen delta`
 
-生成包含真实 `SOURCE_BSDIFF` 操作的合成增量 payload。
-
-常见用法：
+生成包含真实 `SOURCE_BSDIFF` 操作的增量 payload。
 
 ```bash
-uv run --project scripts payload-gen delta \
+uv run payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output /tmp/test_delta.bin
+  --output ./output/test_delta.bin
 ```
 
 生成完整测试样本目录：
 
 ```bash
-uv run --project scripts payload-gen delta \
+uv run payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output tests/data/generated/bsdiff-sample/payload.bin \
-  --bundle-dir tests/data/generated/bsdiff-sample
+  --output ./output/bsdiff-sample/payload.bin \
+  --bundle-dir ./output/bsdiff-sample
 ```
 
 参数说明：
@@ -117,14 +101,14 @@ uv run --project scripts payload-gen delta \
 - `--partition-name`：manifest 中的分区名。默认：`test`
 - `--output`、`-o`：输出 `payload.bin` 路径
 - `--bundle-dir`：可选，输出完整测试样本目录
-- `--block-size`：对齐和 manifest extent 使用的块大小。默认：`4096`
+- `--block-size`：对齐块大小。默认：`4096`
 - `--proto-dir`：`update_metadata.proto` 所在目录
-- `--check-with`：可选的 `zpayload-dumper` 二进制路径，用于做一次 `-l` 快速验证
+- `--check-with`：可选的提取器二进制路径，用于做一次 `-l` 快速验证
 
-使用 `--bundle-dir` 时的输出结构：
+完整样本目录结构：
 
 ```text
-tests/data/generated/bsdiff-sample/
+<bundle-dir>/
   payload.bin
   ota_update.zip
   manifest.textproto
@@ -136,74 +120,40 @@ tests/data/generated/bsdiff-sample/
     <partition>.img
 ```
 
-支持能力：
+## TAR 输入
 
-- 使用 `bsdiff4` 生成真实 `SOURCE_BSDIFF` 操作
-- 自动对旧镜像和新镜像做块对齐
-- 生成的 manifest 会带上：
-  - `data_sha256_hash`
-  - `src_sha256_hash`
-- 可直接生成完整流程提取测试所需的完整测试样本目录
-
-## 这些生成器覆盖什么
-
-当前 Python 工程主要服务于这些 Zig 程序测试类别：
-
-- 合成 `payload.bin` 的正常提取
-- OTA zip 输入处理
-- 损坏或非法 payload 的错误分类
-- 路径穿越和 manifest 校验回归
-- 带真实 old/new 镜像对的 `SOURCE_BSDIFF` 提取
-
-当前还不打算覆盖：
-
-- 单个样本中同时包含多分区、多种 delta operation 的复杂增量 payload
-- payload signature 或已签名 metadata
-- 超出当前 dumper 需要范围的 Android 生产 OTA 元数据
-
-## TAR 输入支持
-
-自 v0.0.1 起，`zpayload-dumper` 也支持包含 `payload.bin` 的 `.tar`、`.tar.gz` 和 `.tgz` 归档。
-Python 生成器目前仅生成 `.zip` 格式的 OTA 文件。如需测试 TAR 输入，可手动创建 TAR 归档：
+生成器默认输出 `.zip` 格式的 OTA 文件。如需测试 TAR 输入，可手动创建归档：
 
 ```bash
-cd tests/data/generated/smoke1
+cd ./output/smoke1
 tar czf ota_update.tar.gz payload.bin
 ```
 
-然后测试：
+## 集成示例
+
+如果你正在开发一个 payload 提取器，可以使用生成的样本做端到端验证：
 
 ```bash
-zig build run -- tests/data/generated/smoke1/ota_update.tar.gz
+# 生成样本
+uv run payload-gen sample --name smoke1 --out-root ./samples
+
+# 用你的提取器验证
+your-dumper -l ./samples/smoke1/payload.bin
+your-dumper -o ./samples/smoke1_out ./samples/smoke1/payload.bin
 ```
 
-## 推荐工作流
+## 覆盖范围
 
-生成一个正常样本并验证：
+当前支持：
 
-```bash
-uv run --project scripts payload-gen sample --name smoke1
-zig build check_e2e -- tests/data/generated/smoke1/payload.bin tests/data/generated/smoke1/extracted
-```
+- 正常 `payload.bin` 提取样本
+- OTA zip 输入
+- 损坏 payload 的错误样本
+- 路径穿越和 manifest 校验
+- 带真实 old/new 镜像对的 `SOURCE_BSDIFF`
 
-生成一个错误样本并验证错误：
+当前不支持：
 
-```bash
-uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
-zig build run -- tests/data/generated/bad-magic/payload.bin
-```
-
-生成并提取一个真实 `SOURCE_BSDIFF` 测试样本：
-
-```bash
-uv run --project scripts payload-gen delta \
-  --old old_boot.img \
-  --new new_boot.img \
-  --partition-name boot \
-  --output /tmp/bsdiff-sample/payload.bin \
-  --bundle-dir /tmp/bsdiff-sample
-
-zig build run -Dbsdiff -- /tmp/bsdiff-sample/payload.bin \
-  --old /tmp/bsdiff-sample/old \
-  -o /tmp/bsdiff-sample/out
-```
+- 单样本中多分区、混合 operation 的复杂增量 payload
+- Payload 签名或已签名 metadata
+- 超出常规提取器需要范围的生产级 Android OTA 元数据

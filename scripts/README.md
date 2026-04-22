@@ -1,7 +1,15 @@
-# Python Generators
+# payload-gen
 
-This repository ships a small `uv`-managed Python project under [`scripts/`](./).
-It is used to generate synthetic test samples for local testing, CI, and regression testing.
+A standalone Python toolkit for generating synthetic Android OTA `payload.bin` test samples.
+
+It is useful for:
+
+- Testing Android OTA payload dumpers / extractors
+- Generating reproducible regression test fixtures
+- CI pipelines that need valid and invalid payload samples
+- Benchmarking extraction tools with controlled inputs
+
+The tool is managed with [`uv`](https://docs.astral.sh/uv/) and can be used independently of any specific dumper implementation.
 
 ## Setup
 
@@ -12,64 +20,48 @@ Requirements:
 - `protoc`
 - `zstd`
 
-Install and sync the helper environment:
+Install dependencies:
 
 ```bash
-uv sync --project scripts
+uv sync
 ```
 
-List available entrypoints:
-
-```bash
-uv run --project scripts payload-gen --help
-```
-
-Recommended top-level entrypoint:
-
-```bash
-uv run --project scripts payload-gen sample --name smoke1
-uv run --project scripts payload-gen delta --old old.img --new new.img --output /tmp/test_delta.bin
-```
-
-## Entrypoints
+## Usage
 
 ### `payload-gen sample`
 
-Generates synthetic `payload.bin` test samples, simulated OTA zips, and matching expected output images.
-
-Typical usage:
+Generates synthetic `payload.bin`, a simulated OTA zip, and matching expected output images.
 
 ```bash
-uv run --project scripts payload-gen sample --name smoke1
-uv run --project scripts payload-gen sample --name bench128 --total-mb 128
-uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
-uv run --project scripts payload-gen sample --name matrix --scenario all --total-mb 32
+uv run payload-gen sample --name smoke1 --out-root ./output
+uv run payload-gen sample --name bench128 --total-mb 128 --out-root ./output
+uv run payload-gen sample --name bad-magic --scenario invalid_magic --out-root ./output
 ```
 
 Parameters:
 
-- `--out-root`: output root relative to the repository root. Default: `tests/data/generated`
-- `--name`: sample name. When `--scenario all` is used, the script expands this into `<name>-<scenario>`
-- `--seed`: fixed random seed for reproducible test sample generation
-- `--total-mb`: target raw partition size budget used to size the synthetic partitions
-- `--scenario`: sample type to generate. Default: `valid`
+- `--out-root`: output directory. Default: `./generated`
+- `--name`: sample name
+- `--seed`: fixed random seed for reproducible generation
+- `--total-mb`: target raw partition size budget
+- `--scenario`: sample type. Default: `valid`
 - `--list-scenarios`: print supported scenarios and exit
 
 Supported scenarios:
 
 - `valid`: well-formed payload and OTA zip
-- `invalid_magic`: payload header magic is corrupted
-- `unsupported_version`: payload header version is changed from `2` to `3`
-- `truncated_payload`: payload file is truncated after metadata/data begins
-- `checksum_mismatch`: one operation blob byte is corrupted without updating manifest hashes
-- `invalid_partition_name`: manifest contains an unsafe partition name such as `../evil_boot`
-- `missing_payload_in_zip`: OTA zip is valid but does not contain `payload.bin`
-- `corrupt_zip_payload`: on-disk `payload.bin` stays valid, but the copy embedded in `ota_update.zip` is corrupted
+- `invalid_magic`: corrupted payload header magic
+- `unsupported_version`: payload version changed from `2` to `3`
+- `truncated_payload`: payload truncated after metadata begins
+- `checksum_mismatch`: corrupted blob without updating manifest hashes
+- `invalid_partition_name`: unsafe partition name such as `../evil_boot`
+- `missing_payload_in_zip`: zip without `payload.bin`
+- `corrupt_zip_payload`: valid on-disk payload, corrupted copy inside zip
 
 Output layout:
 
 ```text
-tests/data/generated/<name>/
+<out-root>/<name>/
   payload.bin
   ota_update.zip
   manifest.textproto
@@ -79,52 +71,44 @@ tests/data/generated/<name>/
     *.img
 ```
 
-Notes:
-
-- `expected_result.txt` is intended for Zig codebase regression tests
-- `scenario.txt` records scenario name, description, seed, and any scenario-specific notes
-- the generator intentionally produces both success samples and invalid test cases
-
 ### `payload-gen delta`
 
-Generates a synthetic delta payload using a real `SOURCE_BSDIFF` operation.
-
-Typical usage:
+Generates a delta payload using a real `SOURCE_BSDIFF` operation.
 
 ```bash
-uv run --project scripts payload-gen delta \
+uv run payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output /tmp/test_delta.bin
+  --output ./output/test_delta.bin
 ```
 
-To generate a complete test sample bundle:
+Generate a complete test bundle:
 
 ```bash
-uv run --project scripts payload-gen delta \
+uv run payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output tests/data/generated/bsdiff-sample/payload.bin \
-  --bundle-dir tests/data/generated/bsdiff-sample
+  --output ./output/bsdiff-sample/payload.bin \
+  --bundle-dir ./output/bsdiff-sample
 ```
 
 Parameters:
 
-- `--old`: source image used by the `SOURCE_BSDIFF` operation
-- `--new`: expected extracted image after applying the patch
+- `--old`: source image for the `SOURCE_BSDIFF` operation
+- `--new`: expected image after applying the patch
 - `--partition-name`: manifest partition name. Default: `test`
 - `--output`, `-o`: output `payload.bin` path
 - `--bundle-dir`: optional test sample bundle directory
-- `--block-size`: block size used for alignment and manifest extents. Default: `4096`
+- `--block-size`: alignment block size. Default: `4096`
 - `--proto-dir`: directory containing `update_metadata.proto`
-- `--check-with`: optional `zpayload-dumper` binary used for a quick `-l` validation
+- `--check-with`: optional dumper binary for quick `-l` validation
 
-Output layout when `--bundle-dir` is used:
+Bundle output layout:
 
 ```text
-tests/data/generated/bsdiff-sample/
+<bundle-dir>/
   payload.bin
   ota_update.zip
   manifest.textproto
@@ -136,74 +120,40 @@ tests/data/generated/bsdiff-sample/
     <partition>.img
 ```
 
-Supported capability:
+## TAR Input
 
-- real `SOURCE_BSDIFF` operation generation using `bsdiff4`
-- block-aligned old/new image handling
-- generated manifest includes:
-  - `data_sha256_hash`
-  - `src_sha256_hash`
-- optional bundle output for full extraction tests
-
-## What The Generators Cover
-
-The Python project is intended to support these Zig codebase test categories:
-
-- normal extraction of synthetic `payload.bin`
-- OTA zip input handling
-- error classification for corrupted or malformed payloads
-- path traversal and manifest validation regressions
-- `SOURCE_BSDIFF` extraction with real old/new image pairs
-
-It does not currently try to model:
-
-- multi-partition delta payloads with mixed operation types in one sample
-- payload signatures or signed metadata blocks
-- Android production OTA metadata beyond what the dumper currently needs
-
-## TAR Input Support
-
-Since v0.0.1, `zpayload-dumper` also supports `.tar`, `.tar.gz`, and `.tgz` archives containing `payload.bin`.
-The Python generator currently produces `.zip` OTA files only. To test TAR input, manually create a TAR archive:
+The generator produces `.zip` OTA files by default. To test TAR input, manually create an archive:
 
 ```bash
-cd tests/data/generated/smoke1
+cd ./output/smoke1
 tar czf ota_update.tar.gz payload.bin
 ```
 
-Then test with:
+## Integration Example
+
+If you are developing a payload dumper, you can use the generated samples for end-to-end validation:
 
 ```bash
-zig build run -- tests/data/generated/smoke1/ota_update.tar.gz
+# Generate a sample
+uv run payload-gen sample --name smoke1 --out-root ./samples
+
+# Validate with your dumper
+your-dumper -l ./samples/smoke1/payload.bin
+your-dumper -o ./samples/smoke1_out ./samples/smoke1/payload.bin
 ```
 
-## Recommended Workflows
+## Coverage
 
-Generate a normal sample and verify it:
+Currently supported:
 
-```bash
-uv run --project scripts payload-gen sample --name smoke1
-zig build check_e2e -- tests/data/generated/smoke1/payload.bin tests/data/generated/smoke1/extracted
-```
+- Normal `payload.bin` extraction samples
+- OTA zip input
+- Error cases for malformed payloads
+- Path traversal and manifest validation
+- Real `SOURCE_BSDIFF` with old/new image pairs
 
-Generate an invalid sample and verify the expected failure:
+Not currently covered:
 
-```bash
-uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
-zig build run -- tests/data/generated/bad-magic/payload.bin
-```
-
-Generate and extract a real `SOURCE_BSDIFF` test sample:
-
-```bash
-uv run --project scripts payload-gen delta \
-  --old old_boot.img \
-  --new new_boot.img \
-  --partition-name boot \
-  --output /tmp/bsdiff-sample/payload.bin \
-  --bundle-dir /tmp/bsdiff-sample
-
-zig build run -Dbsdiff -- /tmp/bsdiff-sample/payload.bin \
-  --old /tmp/bsdiff-sample/old \
-  -o /tmp/bsdiff-sample/out
-```
+- Multi-partition delta payloads with mixed operations
+- Payload signatures or signed metadata
+- Production Android OTA metadata beyond what dumpers typically need
