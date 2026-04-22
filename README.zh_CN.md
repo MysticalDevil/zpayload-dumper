@@ -173,7 +173,7 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 
 Python 辅助工具位于 `scripts/`，现在是标准的 `uv` 管理工程。
 生成测试样本或运行 Python 辅助命令时，统一使用 `uv run --project scripts payload-gen ...`。
-详细说明见 [`docs/PYTHON_GENERATORS.zh.md`](docs/PYTHON_GENERATORS.zh.md)。
+详细说明见 [`scripts/README.zh.md`](scripts/README.zh.md)。
 
 ### 运行测试
 

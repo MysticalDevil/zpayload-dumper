@@ -1,6 +1,6 @@
 # Python Generators
 
-This repository ships a small `uv`-managed Python project under [`scripts/`](../scripts/).
+This repository ships a small `uv`-managed Python project under [`scripts/`](./).
 It is used to generate synthetic test samples for local testing, CI, and regression testing.
 
 ## Setup

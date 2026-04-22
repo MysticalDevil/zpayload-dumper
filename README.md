@@ -210,7 +210,7 @@ Progress:
 
 Python helper tooling lives under `scripts/` as a standard `uv`-managed project.
 Use `uv run --project scripts payload-gen ...` as the primary entrypoint for test sample generation and Python helper commands.
-Detailed generator documentation lives in [`docs/PYTHON_GENERATORS.md`](docs/PYTHON_GENERATORS.md).
+Detailed generator documentation lives in [`scripts/README.md`](scripts/README.md).
 
 Tests:
 
