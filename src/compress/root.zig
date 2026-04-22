@@ -95,22 +95,18 @@ pub fn decompressZstdToWriter(
 ) Error!usize {
     const data = allocator.alloc(u8, compressed_len) catch return error.OutOfMemory;
     defer allocator.free(data);
+    const zstd_buf = allocator.alloc(
+        u8,
+        std.compress.zstd.default_window_len + std.compress.zstd.block_size_max,
+    ) catch return error.OutOfMemory;
+    defer allocator.free(zstd_buf);
 
     try readPositionalExact(file, io, data, offset);
     hasher.update(data);
 
     var fixed_reader = std.Io.Reader.fixed(data);
-    var decompress = std.compress.zstd.Decompress.init(&fixed_reader, &.{}, .{});
-
-    var total: usize = 0;
-    while (true) {
-        const n = decompress.reader.stream(writer, .unlimited) catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return error.ZstdDecompressFailed,
-        };
-        total += n;
-    }
-    return total;
+    var decompress = std.compress.zstd.Decompress.init(&fixed_reader, zstd_buf, .{});
+    return decompress.reader.streamRemaining(writer) catch return error.ZstdDecompressFailed;
 }
 
 pub fn decompressXzToWriter(
@@ -131,16 +127,7 @@ pub fn decompressXzToWriter(
     var fixed_reader = std.Io.Reader.fixed(data);
     var decompress = std.compress.xz.Decompress.init(&fixed_reader, allocator, &.{}) catch return error.XzDecompressFailed;
     defer decompress.deinit();
-
-    var total: usize = 0;
-    while (true) {
-        const n = decompress.reader.stream(writer, .unlimited) catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return error.XzDecompressFailed,
-        };
-        total += n;
-    }
-    return total;
+    return decompress.reader.streamRemaining(writer) catch return error.XzDecompressFailed;
 }
 
 fn readPositionalExact(file: std.Io.File, io: std.Io, buf: []u8, offset: u64) Error!void {

@@ -16,3 +16,4 @@ run_bench_matrix.sh
 scripts/.venv/
 *.egg-info/
 __pycache__/
+bench_results/
