@@ -246,19 +246,19 @@ zpayload-dumper/
 │   │   ├── extent_writer.zig
 │   │   ├── progress.zig
 │   │   └── root.zig
-   │   ├── ffi/               # C FFI 包装器
-   │   │   └── upb.zig
-   │   ├── input/             # 归档输入处理（zip、tar）
-   │   │   ├── archive_common.zig
-   │   │   ├── payload_zip.zig
-   │   │   └── payload_tar.zig
-   │   ├── compress/          # 压缩引擎
-   │   │   └── root.zig
-   │   ├── utils/             # 工具函数
-   │   │   ├── fs_hash.zig
-   │   │   ├── render_style.zig
-   │   │   └── fixture_constants.zig
-   │   └── errors.zig         # 结构化错误系统
+│   ├── ffi/               # C FFI 包装器
+│   │   └── upb.zig
+│   ├── input/             # 归档输入处理（zip、tar）
+│   │   ├── archive_common.zig
+│   │   ├── payload_zip.zig
+│   │   └── payload_tar.zig
+│   ├── compress/          # 压缩引擎
+│   │   └── root.zig
+│   ├── utils/             # 工具函数
+│   │   ├── fs_hash.zig
+│   │   ├── render_style.zig
+│   │   └── fixture_constants.zig
+│   └── errors.zig         # 结构化错误系统
 ├── tests/
 │   ├── e2e_test.zig
 │   ├── integration.zig
