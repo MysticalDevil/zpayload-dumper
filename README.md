@@ -126,6 +126,8 @@ just release
 
 The artifact is placed in `release/` with `SHA256SUMS`.
 
+> **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch.
+
 ## Usage
 
 ```bash

@@ -87,6 +87,8 @@ zig build -Dbsdiff
 
 编译完成后，可通过 `zig build run -- ...` 直接运行，或从安装前缀的 `bin/zpayload-dumper` 调用。
 
+> **平台支持：** `main` 分支仅针对 Linux。Windows 交叉编译和原生构建在 [`feat/windows-support`](../../tree/feat/windows-support) 分支维护。
+
 ## 用法
 
 ### 基本示例
