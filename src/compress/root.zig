@@ -21,8 +21,7 @@ pub fn copyRawToWriter(
 
     while (remaining > 0) {
         const n: usize = @intCast(@min(remaining, in_buf.len));
-        const read_count = file.readPositionalAll(io, in_buf[0..n], pos) catch return error.IoFailure;
-        std.debug.assert(read_count == n);
+        try readPositionalExact(file, io, in_buf[0..n], pos);
         hasher.update(in_buf[0..n]);
         writer.writeAll(in_buf[0..n]) catch return error.IoFailure;
         total_written += n;
@@ -42,7 +41,6 @@ pub fn decompressBz2ToWriter(
     in_buf: []u8,
     out_buf: []u8,
 ) Error!usize {
-
     var stream: c.bz_stream = std.mem.zeroes(c.bz_stream);
     if (c.BZ2_bzDecompressInit(&stream, 0, 0) != c.BZ_OK) return error.Bzip2DecompressFailed;
     errdefer _ = c.BZ2_bzDecompressEnd(&stream);
@@ -56,8 +54,7 @@ pub fn decompressBz2ToWriter(
     while (true) {
         if (in_pos == in_len and remaining > 0) {
             in_len = @intCast(@min(remaining, in_buf.len));
-            const read_count = file.readPositionalAll(io, in_buf[0..in_len], pos) catch return error.IoFailure;
-            std.debug.assert(read_count == in_len);
+            try readPositionalExact(file, io, in_buf[0..in_len], pos);
             hasher.update(in_buf[0..in_len]);
             pos += in_len;
             remaining -= in_len;
@@ -99,8 +96,7 @@ pub fn decompressZstdToWriter(
     const data = allocator.alloc(u8, compressed_len) catch return error.OutOfMemory;
     defer allocator.free(data);
 
-    const read_count = file.readPositionalAll(io, data, offset) catch return error.IoFailure;
-    std.debug.assert(read_count == compressed_len);
+    try readPositionalExact(file, io, data, offset);
     hasher.update(data);
 
     var fixed_reader = std.Io.Reader.fixed(data);
@@ -129,8 +125,7 @@ pub fn decompressXzToWriter(
     const data = allocator.alloc(u8, compressed_len) catch return error.OutOfMemory;
     defer allocator.free(data);
 
-    const read_count = file.readPositionalAll(io, data, offset) catch return error.IoFailure;
-    std.debug.assert(read_count == compressed_len);
+    try readPositionalExact(file, io, data, offset);
     hasher.update(data);
 
     var fixed_reader = std.Io.Reader.fixed(data);
@@ -146,4 +141,38 @@ pub fn decompressXzToWriter(
         total += n;
     }
     return total;
+}
+
+fn readPositionalExact(file: std.Io.File, io: std.Io, buf: []u8, offset: u64) Error!void {
+    const read_count = file.readPositionalAll(io, buf, offset) catch return error.IoFailure;
+    if (read_count != buf.len) return error.IoFailure;
+}
+
+test "copyRawToWriter returns IoFailure on truncated input" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const path = try std.fmt.allocPrint(allocator, "{s}/short.bin", .{tmp.sub_path});
+    defer allocator.free(path);
+
+    {
+        var file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+        defer file.close(io);
+        var writer = file.writer(io, &.{});
+        try writer.interface.writeAll("AB");
+        try writer.flush();
+    }
+
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+    var in_buf: [8]u8 = undefined;
+
+    try std.testing.expectError(error.IoFailure, copyRawToWriter(file, io, 0, 4, &hasher, &out.writer, &in_buf));
 }

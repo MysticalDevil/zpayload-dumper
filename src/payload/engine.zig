@@ -741,7 +741,7 @@ fn materializeZeroBuffer(
     while (remaining > 0) {
         const chunk_len: usize = @intCast(@min(remaining, zero_buf.len));
         const read_count = shared.payload_file.readPositionalAll(shared.io, zero_buf[0..chunk_len], position) catch return error.IoFailure;
-        std.debug.assert(read_count == chunk_len);
+        if (read_count != chunk_len) return error.IoFailure;
         hasher.update(zero_buf[0..chunk_len]);
         remaining -= chunk_len;
         position += chunk_len;
