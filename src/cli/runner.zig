@@ -2,6 +2,7 @@ const std = @import("std");
 const errors = @import("../errors.zig");
 const payload = @import("../payload/root.zig");
 const input_mod = @import("../input/root.zig");
+const archive_common = input_mod.archive_common;
 const zip_payload = input_mod.payload_zip;
 const tar_payload = input_mod.payload_tar;
 const render = @import("render.zig");
@@ -33,18 +34,11 @@ pub fn run(
         break :blk @max(1, cpu_count / 2);
     };
 
-    var cleanup_tmp_dir: ?[]u8 = null;
-    var cleanup_tar_tmp_dir: ?[]u8 = null;
+    var cleanup_archive_tmp_dir: ?[]u8 = null;
     var cleanup_payload_path: ?[]u8 = null;
     defer if (cleanup_payload_path) |path| gpa.free(path);
-    defer if (cleanup_tmp_dir) |path| {
-        zip_payload.cleanupExtractedPayloadTempDir(io, path) catch |err| {
-            std.log.warn("failed to cleanup temporary directory '{s}': {}", .{ path, err });
-        };
-        gpa.free(path);
-    };
-    defer if (cleanup_tar_tmp_dir) |path| {
-        tar_payload.cleanupExtractedPayloadTempDir(io, path) catch |err| {
+    defer if (cleanup_archive_tmp_dir) |path| {
+        archive_common.cleanupExtractedPayloadTempDir(io, path) catch |err| {
             std.log.warn("failed to cleanup temporary directory '{s}': {}", .{ path, err });
         };
         gpa.free(path);
@@ -106,7 +100,7 @@ pub fn run(
             if (extracted.used_fallback_tmp) {
                 ui.warn("temporary extraction moved to ./.tmp because the preferred temp directory does not have enough free space") catch return error.IoFailure;
             }
-            cleanup_tmp_dir = extracted.temp_dir;
+            cleanup_archive_tmp_dir = extracted.temp_dir;
             cleanup_payload_path = extracted.payload_path;
             effective_payload = extracted.payload_path;
         } else if (is_tar_input) {
@@ -115,7 +109,7 @@ pub fn run(
             if (extracted.used_fallback_tmp) {
                 ui.warn("temporary extraction moved to ./.tmp because the preferred temp directory does not have enough free space") catch return error.IoFailure;
             }
-            cleanup_tar_tmp_dir = extracted.temp_dir;
+            cleanup_archive_tmp_dir = extracted.temp_dir;
             cleanup_payload_path = extracted.payload_path;
             effective_payload = extracted.payload_path;
         }
