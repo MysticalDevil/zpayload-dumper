@@ -12,3 +12,4 @@ exclude = [
 
 [MD013]
 line-length = 130
+code-blocks = false
