@@ -20,16 +20,16 @@ Prerequisites:
 |--------|----------------|--------|-------|
 | Arch Linux | `pacman` | ✅ Supported | `protobuf` ≥ 34 ships `protoc-gen-upb` |
 | Gentoo | `emerge` | ✅ Supported | `dev-libs/protobuf[upb]` |
-| Ubuntu | `apt` | ❌ Not supported | apt `protobuf-compiler` (3.21) lacks upb plugins |
-| Debian | `apt` | ❌ Not supported | same as Ubuntu |
-| Fedora | `dnf` | ❌ Not supported | dnf `protobuf-compiler` lacks upb plugins |
+| Ubuntu | `apt` | ⚠️ Build from source | apt `protobuf-compiler` (3.21) lacks upb plugins |
+| Debian | `apt` | ⚠️ Build from source | same as Ubuntu |
+| Fedora | `dnf` | ⚠️ Build from source | dnf `protobuf-compiler` lacks upb plugins |
 | Alpine | `apk` | ⚠️ Known issue | `protoc-gen-upb` present, but Zig/musl static-link order fails |
 
-> **Why apt/dnf don't work:** The `protoc-gen-upb` and `protoc-gen-upb_minitable` plugins are only
+> **Why apt/dnf need source build:** The `protoc-gen-upb` and `protoc-gen-upb_minitable` plugins are only
 > included in protobuf 30+. Ubuntu 24.04, Debian 12 and Fedora 41 still ship protobuf 3.21.x,
 > whose `protoc` cannot generate upb C code.
 
-### Install Dependencies (Arch / Gentoo)
+### Install Dependencies
 
 #### Arch Linux
 
@@ -43,9 +43,9 @@ sudo pacman -S --needed protobuf bzip2
 sudo emerge --ask dev-libs/protobuf app-arch/bzip2
 ```
 
-### Building protobuf from source (Ubuntu / Debian / Fedora)
+#### Ubuntu / Debian / Fedora
 
-If your distro does not provide a recent enough `protoc` with upb plugins, build protobuf from source:
+Build protobuf from source:
 
 ```bash
 # 1. Install build dependencies
@@ -71,7 +71,7 @@ cd /path/to/zpayload-dumper
 zig build
 ```
 
-### Alpine Linux known issue
+#### Alpine Linux
 
 Alpine's `protobuf` package (31.1+) includes `protoc-gen-upb`, but `upb` is provided only as a
 static archive (`libupb.a`). Zig's linker on musl targets places static libraries before object
@@ -255,14 +255,16 @@ zig build bench_pressure -- /path/to/payload.bin
   - `REPLACE_BZ`
   - `ZSTD`
   - `ZERO`
-  - `SOURCE_COPY` (delta — requires `--old`)
-  - `SOURCE_BSDIFF` (delta — requires `--old` and `-Dbsdiff`)
-- SHA-256 verification for operation data.
-- Source image SHA-256 verification for delta operations (`src_sha256_hash`).
+- `SOURCE_COPY` (delta — requires `--old`)
+- `SOURCE_BSDIFF` (delta — requires `--old` and `-Dbsdiff`)
+- SHA-256 verification for operation data
+- Source image SHA-256 verification for delta operations (`src_sha256_hash`)
 - Input:
   - raw `payload.bin`
   - `.zip` containing `payload.bin`
   - `.tar`/`.tar.gz`/`.tgz` containing `payload.bin`
+- Disk space pre-check before extraction
+- Colored output with automatic TTY detection
 
 > See [`docs/ODD_OTA_FORMATS.md`](docs/ODD_OTA_FORMATS.md) for a vendor-by-vendor breakdown
 > of non-standard OTA formats (vivo, OPPO, Samsung, Huawei, Xiaomi, Motorola, Sony)

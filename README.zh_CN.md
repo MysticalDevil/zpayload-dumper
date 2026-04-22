@@ -29,39 +29,45 @@ Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数
 
 ### 安装系统依赖
 
-安装下方列出的包后，如果链接时仍然提示缺少 `upb` 或 `utf8_range`，可以再手动编译安装这两个库。
-
-#### Debian / Ubuntu
-
-```bash
-sudo apt update
-sudo apt install -y protobuf-compiler libbz2-dev libupb-dev libgrpc-dev
-```
-
-> Debian 上 `libupb.so` 由 `libgrpc-dev` 提供
-
-#### Fedora
-
-```bash
-sudo dnf install -y protobuf-compiler bzip2-devel grpc-devel
-```
-
 #### Arch Linux
 
 ```bash
-sudo pacman -S --needed protobuf bzip2 grpc
+sudo pacman -S --needed protobuf bzip2
 ```
-
-> Arch 的 `grpc` 包包含 `libupb.so`，`upb` 和 `utf8_range` 没有单独官方的包
 
 #### Gentoo
 
 ```bash
-sudo emerge --ask dev-libs/protobuf app-arch/bzip2 net-libs/grpc
+sudo emerge --ask dev-libs/protobuf app-arch/bzip2
 ```
 
-> Gentoo 的 `dev-libs/protobuf` 有 `libupb` USE 标志。如果你的系统配置没有编译出可链接的 `upb`/`utf8_range`，
-> 需要先手动安装再执行 `zig build`
+#### Ubuntu / Debian / Fedora
+
+从源码编译安装 protobuf：
+
+```bash
+# 1. 安装编译依赖
+# Ubuntu/Debian:
+sudo apt install -y cmake g++ git libbz2-dev
+# Fedora:
+sudo dnf install -y cmake gcc-c++ git bzip2-devel
+
+# 2. 编译并安装 protobuf（包含 protoc + libupb + upb 生成器）
+git clone https://github.com/protocolbuffers/protobuf.git
+cd protobuf
+git checkout v34.1   # 或更新版本
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -Dprotobuf_BUILD_TESTS=OFF \
+  -Dprotobuf_BUILD_SHARED_LIBS=ON \
+  -Dprotobuf_BUILD_UPB=ON
+cmake --build build -j$(nproc)
+sudo cmake --install build
+
+# 3. 编译 zpayload-dumper
+cd /path/to/zpayload-dumper
+zig build
+```
 
 ## 编译
 

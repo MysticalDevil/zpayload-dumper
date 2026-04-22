@@ -161,6 +161,22 @@ tests/data/generated/bsdiff-sample/
 - payload signature 或已签名 metadata
 - 超出当前 dumper 需要范围的 Android 生产 OTA 元数据
 
+## TAR 输入支持
+
+自 v0.0.1 起，`zpayload-dumper` 也支持包含 `payload.bin` 的 `.tar`、`.tar.gz` 和 `.tgz` 归档。
+Python 生成器目前仅生成 `.zip` 格式的 OTA 文件。如需测试 TAR 输入，可手动创建 TAR 归档：
+
+```bash
+cd tests/data/generated/smoke1
+tar czf ota_update.tar.gz payload.bin
+```
+
+然后测试：
+
+```bash
+zig build run -- tests/data/generated/smoke1/ota_update.tar.gz
+```
+
 ## 推荐工作流
 
 生成一个正常样本并验证：

@@ -257,11 +257,19 @@ zpayload-dumper/
 │   │   ├── extent_writer.zig
 │   │   ├── progress.zig
 │   │   └── root.zig
-│   ├── ffi/               # C FFI wrappers
-│   │   ├── compress.zig
-│   │   └── upb.zig
-│   ├── input/             # ZIP input handling
-│   └── errors.zig         # Structured error system
+   │   ├── ffi/               # C FFI wrappers
+   │   │   └── upb.zig
+   │   ├── input/             # Archive input handling (zip, tar)
+   │   │   ├── archive_common.zig
+   │   │   ├── payload_zip.zig
+   │   │   └── payload_tar.zig
+   │   ├── compress/          # Compression engines
+   │   │   └── root.zig
+   │   ├── utils/             # Utilities
+   │   │   ├── fs_hash.zig
+   │   │   ├── render_style.zig
+   │   │   └── fixture_constants.zig
+   │   └── errors.zig         # Structured error system
 ├── tests/
 │   ├── e2e_test.zig
 │   ├── integration.zig
@@ -297,6 +305,8 @@ zpayload-dumper/
 | **Built-in benchmark** | ❌ | ✅ |
 | **Synthetic sample generator** | ❌ | ✅ (Python script) |
 | **Library API** | ❌ (single main package) | ✅ (`src/root.zig`) |
+| **Dry-run mode** | ❌ | ✅ |
+| **TAR input** | ❌ | ✅ (`.tar`, `.tar.gz`, `.tgz`) |
 
 ---
 

@@ -1,14 +1,19 @@
 # Odd OTA Formats — Vendor Compatibility Notes
 
-> This document tracks non-standard Android OTA formats reported by the community (XDA, GitHub issues, vendor forums) and records what `zpayload-dumper` currently handles, what it does not, and why.
+> This document tracks non-standard Android OTA formats reported by the
+> community (XDA, GitHub issues, vendor forums) and records what
+> `zpayload-dumper` currently handles, what it does not, and why.
 
 ---
 
 ## Background
 
-Google’s A/B (seamless) update system, introduced in Android Oreo, uses a single `payload.bin` file inside a ZIP package. The format is defined by the ChromeOS update engine and follows a strict header → manifest → signatures → data blob layout.
+Google’s A/B (seamless) update system, introduced in Android Oreo, uses a single `payload.bin` file inside a ZIP package. The
+format is defined by the ChromeOS update engine and follows a strict header → manifest → signatures → data blob layout.
 
-However, several OEMs have deviated from this standard—either inside the payload itself (new `InstallOperation` types) or in the outer packaging (encrypted ZIPs, alternate archive formats). This document catalogs those deviations as they relate to extraction tools like `zpayload-dumper`.
+However, several OEMs have deviated from this standard—either inside the payload itself (new `InstallOperation` types) or in the
+outer packaging (encrypted ZIPs, alternate archive formats). This document catalogs those deviations as they relate to extraction
+tools like `zpayload-dumper`.
 
 ---
 
@@ -16,13 +21,15 @@ However, several OEMs have deviated from this standard—either inside the paylo
 
 ### What changed
 
-Since early 2024, firmware from BBK-owned brands began using **Zstandard (zstd)** compression for data blobs inside `payload.bin`. This corresponds to a new `InstallOperation` enum value:
+Since early 2024, firmware from BBK-owned brands began using **Zstandard (zstd)** compression for data blobs inside `payload.bin`.
+This corresponds to a new `InstallOperation` enum value:
 
 ```protobuf
 ZSTD = 14;
 ```
 
-Older versions of `payload-dumper-go` and the original Python `payload_dumper` would either crash or emit zero-byte images because the decompressor did not recognize type `14`.
+Older versions of `payload-dumper-go` and the original Python `payload_dumper` would either crash or emit zero-byte images because
+the decompressor did not recognize type `14`.
 
 ### Community references
 
@@ -47,9 +54,12 @@ Older versions of `payload-dumper-go` and the original Python `payload_dumper` w
 
 ### What changed
 
-OPPO and realme ship OTA files with the `.ozip` extension. These are **AES-ECB encrypted ZIP archives**, not plain ZIP files. The file header starts with `OPPOENCRYPT!`. Each device family uses a hard-coded AES key; community tools like `ozipdecrypt.py` maintain a key database.
+OPPO and realme ship OTA files with the `.ozip` extension. These are **AES-ECB encrypted ZIP archives**, not plain ZIP files. The
+file header starts with `OPPOENCRYPT!`. Each device family uses a hard-coded AES key; community tools like `ozipdecrypt.py`
+maintain a key database.
 
-This is **not** a payload.bin format deviation—it happens one layer *above* payload.bin. You must decrypt the OZIP to a normal ZIP first, then extract `payload.bin`.
+This is **not** a payload.bin format deviation—it happens one layer *above* payload.bin. You must decrypt the OZIP to a normal ZIP
+first, then extract `payload.bin`.
 
 ### Community references
 
@@ -92,7 +102,8 @@ This is an entirely different ecosystem. No `payload.bin` exists to dump.
 
 ### What changed
 
-Huawei uses the **UPDATE.APP** format, which is proprietary and unrelated to the ChromeOS update engine. It is processed by Huawei’s own `update_engine` binary.
+Huawei uses the **UPDATE.APP** format, which is proprietary and unrelated to the ChromeOS update engine. It is processed by
+Huawei’s own `update_engine` binary.
 
 ### Project status
 
@@ -108,7 +119,8 @@ Huawei uses the **UPDATE.APP** format, which is proprietary and unrelated to the
 
 ### What changed
 
-Xiaomi distributes firmware as **TGZ / TAR** archives. After unpacking, you typically obtain a standard `payload.bin` inside a plain ZIP. The payload itself is usually well-formed.
+Xiaomi distributes firmware as **TGZ / TAR** archives. After unpacking, you typically obtain a standard `payload.bin` inside a
+plain ZIP. The payload itself is usually well-formed.
 
 ### Project status
 
@@ -125,7 +137,8 @@ Xiaomi distributes firmware as **TGZ / TAR** archives. After unpacking, you typi
 
 ### What changed
 
-Some Motorola firmware uses **sparsechunk** files instead of `payload.bin`. This is a sparse ext4 image split into chunks for flashing.
+Some Motorola firmware uses **sparsechunk** files instead of `payload.bin`. This is a sparse ext4 image split into chunks for
+flashing.
 
 ### Project status
 
@@ -141,7 +154,8 @@ Some Motorola firmware uses **sparsechunk** files instead of `payload.bin`. This
 
 ### What changed
 
-Sony historically uses **FTF** (Flash Tool Firmware) format, handled by Flashtool / NewFlasher. Modern Sony devices with A/B partitioning may use standard payload.bin, but the traditional distribution path is FTF.
+Sony historically uses **FTF** (Flash Tool Firmware) format, handled by Flashtool / NewFlasher. Modern Sony devices with A/B
+partitioning may use standard payload.bin, but the traditional distribution path is FTF.
 
 ### Project status
 
@@ -164,7 +178,8 @@ Incremental (delta) OTAs contain operations that reference the **current on-devi
 - `BSDIFF = 3`
 - `MOVE = 2` (deprecated)
 
-Applying these requires the original partition image. A dump tool that only reads the OTA file cannot reconstruct the final image without the source.
+Applying these requires the original partition image. A dump tool that only reads the OTA file cannot reconstruct the final image
+without the source.
 
 ### Community references
 
@@ -184,7 +199,8 @@ Applying these requires the original partition image. A dump tool that only read
 
 ## 9. Proto-Defined but Not Yet Implemented Operations
 
-The following `InstallOperation.Type` values are already present in `proto/update_metadata.proto` and `src/ffi/upb.zig`, but **lack decompression / application logic** in the engine:
+The following `InstallOperation.Type` values are already present in `proto/update_metadata.proto` and `src/ffi/upb.zig`, but
+**lack decompression / application logic** in the engine:
 
 | Type | Value | Compression / Format | Status |
 |------|-------|---------------------|--------|
@@ -194,7 +210,8 @@ The following `InstallOperation.Type` values are already present in `proto/updat
 | `LZ4DIFF_BSDIFF` | 12 | LZ4 diff + bsdiff | ❌ Not implemented |
 | `LZ4DIFF_PUFFDIFF` | 13 | LZ4 diff + puffdiff | ❌ Not implemented |
 
-If a future firmware (e.g., a Pixel device adopting `BROTLI_BSDIFF`) uses any of these, the engine will return `error.UnsupportedOperation`.
+If a future firmware (e.g., a Pixel device adopting `BROTLI_BSDIFF`) uses any of these, the engine will return
+`error.UnsupportedOperation`.
 
 ---
 
@@ -218,6 +235,8 @@ If a future firmware (e.g., a Pixel device adopting `BROTLI_BSDIFF`) uses any of
 ## What This Means for the Project
 
 1. **The most common "odd" case we actually face** is BBK’s adoption of `ZSTD = 14`. That is already handled.
-2. **The next likely gap** is Google or another vendor enabling `BROTLI_BSDIFF = 10`. Adding a Brotli decompressor (or linking `brotli`) would be the fix.
-3. **Everything else** (OZIP, tar.md5, UPDATE.APP, sparsechunk, FTF) is outside the scope of a `payload.bin` dumper. We should document this clearly so users do not file false-positive bug reports.
+2. **The next likely gap** is Google or another vendor enabling `BROTLI_BSDIFF = 10`. Adding a Brotli decompressor (or linking
+`brotli`) would be the fix.
+3. **Everything else** (OZIP, tar.md5, UPDATE.APP, sparsechunk, FTF) is outside the scope of a `payload.bin` dumper. We should
+document this clearly so users do not file false-positive bug reports.
 4. **Delta OTA** should remain unsupported; a dumper is not a patch applier.

@@ -161,6 +161,22 @@ It does not currently try to model:
 - payload signatures or signed metadata blocks
 - Android production OTA metadata beyond what the dumper currently needs
 
+## TAR Input Support
+
+Since v0.0.1, `zpayload-dumper` also supports `.tar`, `.tar.gz`, and `.tgz` archives containing `payload.bin`.
+The Python generator currently produces `.zip` OTA files only. To test TAR input, manually create a TAR archive:
+
+```bash
+cd tests/data/generated/smoke1
+tar czf ota_update.tar.gz payload.bin
+```
+
+Then test with:
+
+```bash
+zig build run -- tests/data/generated/smoke1/ota_update.tar.gz
+```
+
 ## Recommended Workflows
 
 Generate a normal sample and verify it:

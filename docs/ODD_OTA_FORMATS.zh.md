@@ -1,12 +1,15 @@
 # 怪异 OTA 格式 —— 厂商兼容性备忘
 
-> 本文档汇总社区（XDA、GitHub Issues、厂商论坛）报告的非标准 Android OTA 格式，并记录 `zpayload-dumper` 目前能处理什么、不能处理什么以及原因。
+> 本文档汇总社区（XDA、GitHub Issues、厂商论坛）报告的非标准 Android OTA
+> 格式，并记录 `zpayload-dumper` 目前能处理什么、不能处理什么以及原因。
 
 ---
 
 ## 背景
 
-Google 在 Android Oreo 引入的 A/B（无缝）更新系统中，OTA 包内只有一个 `payload.bin` 文件。该格式由 ChromeOS 更新引擎定义，遵循严格的 header → manifest → signatures → data blob 布局。
+Google 在 Android Oreo 引入的 A/B（无缝）更新系统中，OTA 包内只有一个
+`payload.bin` 文件。该格式由 ChromeOS 更新引擎定义，遵循严格的 header →
+manifest → signatures → data blob 布局。
 
 然而，多家 OEM 偏离了这一标准——有的在 payload 内部引入了新的 `InstallOperation` 类型，有的在外层包装上做了手脚（加密 ZIP、替代归档格式）。本文档按项目范围分类整理这些偏离。
 
@@ -47,7 +50,9 @@ ZSTD = 14;
 
 ### 发生了什么变化
 
-OPPO 和 realme 的 OTA 文件扩展名为 `.ozip`，实质是 **AES-ECB 加密的 ZIP 归档**，不是普通 ZIP。文件头以 `OPPOENCRYPT!` 开头，每类设备使用硬编码 AES 密钥；社区工具 `ozipdecrypt.py` 维护了一个密钥数据库。
+OPPO 和 realme 的 OTA 文件扩展名为 `.ozip`，实质是 **AES-ECB 加密的 ZIP
+归档**，不是普通 ZIP。文件头以 `OPPOENCRYPT!` 开头，每类设备使用硬编码
+AES 密钥；社区工具 `ozipdecrypt.py` 维护了一个密钥数据库。
 
 这**不是** payload.bin 格式层面的偏差，而是比 payload.bin **更外层**的包装。必须先解密 OZIP 得到普通 ZIP，再从中提取 `payload.bin`。
 
@@ -111,7 +116,7 @@ OPPO 和 realme 的 OTA 文件扩展名为 `.ozip`，实质是 **AES-ECB 加密�
 
 | 方面 | 状态 |
 |------|------|
-| TGZ/TAR 解压 | ❌ 不在项目范围内（用 `tar` 或 `7z`） |
+| TGZ/TAR 输入 | ✅ 支持（`.tar`、`.tar.gz`、`.tgz`） |
 | payload.bin 提取 | ✅ 支持 |
 
 **结论：** payload 本身是标准的，只是外层包装不同。
@@ -138,7 +143,9 @@ OPPO 和 realme 的 OTA 文件扩展名为 `.ozip`，实质是 **AES-ECB 加密�
 
 ### 发生了什么变化
 
-索尼传统上使用 **FTF**（Flash Tool Firmware）格式，由 Flashtool / NewFlasher 处理。现代索尼 A/B 分区设备可能使用标准 payload.bin，但传统分发路径仍是 FTF。
+索尼传统上使用 **FTF**（Flash Tool Firmware）格式，由 Flashtool /
+NewFlasher 处理。现代索尼 A/B 分区设备可能使用标准 payload.bin，但传统分发路径仍是
+FTF。
 
 ### 项目状态
 
@@ -205,7 +212,7 @@ OPPO 和 realme 的 OTA 文件扩展名为 `.ozip`，实质是 **AES-ECB 加密�
 | OPPO / realme | **OZIP 加密** | 解密后为标准格式 | ❌（外层问题） |
 | 三星 | **tar.md5** | 不适用 | ❌ |
 | 华为 | **UPDATE.APP** | 不适用 | ❌ |
-| 小米 | **TGZ/TAR** | 通常为 standard | ✅（可从 tar/tar.gz/tgz 中提取 payload.bin） |
+| 小米 | **TGZ/TAR** | 通常为 standard | ✅（支持从 tar/tar.gz/tgz 中直接提取 payload.bin） |
 | 摩托罗拉 | **sparsechunk** | 不适用 | ❌ |
 | 索尼 | **FTF** | 不适用 | ❌ |
 | 增量 OTA | 普通 ZIP | SOURCE_COPY、BSDIFF 等 | ❌（设计上不支持） |
@@ -215,6 +222,8 @@ OPPO 和 realme 的 OTA 文件扩展名为 `.ozip`，实质是 **AES-ECB 加密�
 ## 对项目的意义
 
 1. **我们实际面对的最常见"怪异"情况**是 BBK 系采用 `ZSTD = 14`。这已经处理完毕。
-2. **下一个可能的缺口**是 Google 或其他厂商启用 `BROTLI_BSDIFF = 10`。届时需要引入 Brotli 解压器（或链接 `brotli` 库）。
-3. **其余格式**（OZIP、tar.md5、UPDATE.APP、sparsechunk、FTF）均不在 `payload.bin` 提取工具的职责范围内。应通过本文档明确说明，避免用户提交无效 bug 报告。
+2. **下一个可能的缺口**是 Google 或其他厂商启用 `BROTLI_BSDIFF = 10`。届时需要引入
+   Brotli 解压器（或链接 `brotli` 库）。
+3. **其余格式**（OZIP、tar.md5、UPDATE.APP、sparsechunk、FTF）均不在
+   `payload.bin` 提取工具的职责范围内。应通过本文档明确说明，避免用户提交无效 bug 报告。
 4. **增量 OTA** 应保持不支持；提取工具不是补丁应用工具。
