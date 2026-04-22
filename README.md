@@ -263,6 +263,10 @@ zig build bench_pressure -- /path/to/payload.bin
   - raw `payload.bin`
   - `.zip` containing `payload.bin`
 
+> See [`docs/ODD_OTA_FORMATS.md`](docs/ODD_OTA_FORMATS.md) for a vendor-by-vendor breakdown
+> of non-standard OTA formats (vivo, OPPO, Samsung, Huawei, Xiaomi, Motorola, Sony)
+> and what this project does / does not handle.
+
 ## Benchmark vs payload-dumper-go
 
 All numbers below are actual runtime (mean of 5 runs, hyperfine).

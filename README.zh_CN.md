@@ -308,6 +308,9 @@ uv run --project scripts payload-gen delta \
 - 对增量操作的源镜像数据进行 SHA-256 校验（`src_sha256_hash`）
 - 输入支持：单独的 `payload.bin`，或包含 `payload.bin` 的 `.zip` 文件
 
+> 各厂商非标准 OTA 格式的兼容性说明（vivo、OPPO、三星、华为、小米、摩托罗拉、索尼等），
+> 请参阅 [`docs/ODD_OTA_FORMATS.zh.md`](docs/ODD_OTA_FORMATS.zh.md)。
+
 ## 参考
 
 - Android Update Engine 元数据格式：
