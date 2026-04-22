@@ -10,7 +10,7 @@ const cli_ui = @import("ui.zig");
 const output = @import("output.zig");
 
 const Error = errors.AppError;
-const default_tmp_base = "/tmp";
+const default_tmp_base = ".tmp";
 const zip_suffix = ".zip";
 const tar_suffixes = [_][]const u8{ ".tar", ".tar.gz", ".tgz" };
 
@@ -111,7 +111,7 @@ pub fn run(
             effective_payload = extracted.payload_path;
         } else if (is_tar_input) {
             ui.warn("tar input detected, extracting payload.bin first") catch return error.IoFailure;
-            const extracted = try tar_payload.extractPayloadBinFromTar(gpa, io, options.input);
+            const extracted = try tar_payload.extractPayloadBinFromTar(gpa, io, tmp_base, options.input);
             if (extracted.used_fallback_tmp) {
                 ui.warn("temporary extraction moved to ./.tmp because the preferred temp directory does not have enough free space") catch return error.IoFailure;
             }

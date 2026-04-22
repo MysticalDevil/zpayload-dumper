@@ -23,22 +23,27 @@ pub const PayloadMetadata = struct {
 
 pub fn cleanupExtractedPayloadTempDir(io: std.Io, path: []const u8) Error!void {
     if (std.fs.path.isAbsolute(path)) {
-        const parent_path = std.fs.path.dirname(path) orelse return error.IoFailure;
+        const parent_path = std.fs.path.dirname(path) orelse return error.TempDirectoryCleanupFailed;
         const basename = std.fs.path.basename(path);
-        var parent_dir = std.Io.Dir.openDirAbsolute(io, parent_path, .{}) catch return error.IoFailure;
+        var parent_dir = std.Io.Dir.openDirAbsolute(io, parent_path, .{}) catch return error.TempDirectoryCleanupFailed;
         defer parent_dir.close(io);
-        parent_dir.deleteTree(io, basename) catch return error.IoFailure;
+        parent_dir.deleteTree(io, basename) catch return error.TempDirectoryCleanupFailed;
         return;
     }
 
-    std.Io.Dir.cwd().deleteTree(io, path) catch return error.IoFailure;
+    std.Io.Dir.cwd().deleteTree(io, path) catch return error.TempDirectoryCleanupFailed;
 }
 
 fn isGzipped(tar_path: []const u8) bool {
     return std.mem.endsWith(u8, tar_path, ".tar.gz") or std.mem.endsWith(u8, tar_path, ".tgz");
 }
 
-pub fn extractPayloadBinFromTar(allocator: std.mem.Allocator, io: std.Io, tar_path: []const u8) Error!TarExtractResult {
+pub fn extractPayloadBinFromTar(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    tmp_base: []const u8,
+    tar_path: []const u8,
+) Error!TarExtractResult {
     var tar_file = std.Io.Dir.cwd().openFile(io, tar_path, .{}) catch return error.InvalidTarArchive;
     defer tar_file.close(io);
 
@@ -48,13 +53,18 @@ pub fn extractPayloadBinFromTar(allocator: std.mem.Allocator, io: std.Io, tar_pa
     if (isGzipped(tar_path)) {
         var flate_buffer: [flate.max_window_len]u8 = undefined;
         var decompress: flate.Decompress = .init(&fr.interface, .gzip, &flate_buffer);
-        return try extractFromTarReader(allocator, io, &decompress.reader);
+        return try extractFromTarReader(allocator, io, tmp_base, &decompress.reader);
     } else {
-        return try extractFromTarReader(allocator, io, &fr.interface);
+        return try extractFromTarReader(allocator, io, tmp_base, &fr.interface);
     }
 }
 
-fn extractFromTarReader(allocator: std.mem.Allocator, io: std.Io, reader: *std.Io.Reader) Error!TarExtractResult {
+fn extractFromTarReader(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    tmp_base: []const u8,
+    reader: *std.Io.Reader,
+) Error!TarExtractResult {
     var file_name_buf: [std.fs.max_path_bytes]u8 = undefined;
     var link_name_buf: [std.fs.max_path_bytes]u8 = undefined;
     var iter = std.tar.Iterator.init(reader, .{
@@ -66,19 +76,9 @@ fn extractFromTarReader(allocator: std.mem.Allocator, io: std.Io, reader: *std.I
         if (file.kind != .file) continue;
         if (!std.mem.eql(u8, file.name, "payload.bin")) continue;
 
-        // Tar does not support random seek, so we cannot retry after reader
-        // consumption fails. Use a single temp base that is known to work.
-        const base = TempBaseSelection{
-            .base_path = try allocator.dupe(u8, ".tmp"),
-            .is_absolute = false,
-            .used_fallback = false,
-        };
+        const base = try selectTempBase(allocator, tmp_base, file.size);
         defer allocator.free(base.base_path);
-
-        if (try attemptExtractPayloadFile(allocator, io, &iter, file, &file_name_buf, base, false)) |result| {
-            return result;
-        }
-        return error.IoFailure;
+        return try attemptExtractPayloadFile(allocator, io, &iter, file, base);
     }
 
     return error.PayloadNotFoundInTar;
@@ -112,23 +112,21 @@ fn readMetadataFromTarReader(allocator: std.mem.Allocator, reader: *std.Io.Reade
         if (file.kind != .file) continue;
         if (!std.mem.eql(u8, file.name, "payload.bin")) continue;
 
-        const header_prefix = readTarEntryPrefixAlloc(allocator, reader, file, 24) catch return error.InvalidTarArchive;
+        const header_prefix = try readTarEntryPrefixAlloc(allocator, reader, file, 24);
         defer allocator.free(header_prefix);
 
-        const payload_header = parseHeaderBytes(header_prefix) catch return error.InvalidTarArchive;
-        const total_prefix_len_u64 = 24 + payload_header.manifest_len + payload_header.metadata_signature_len;
-        const total_prefix_len = std.math.cast(usize, total_prefix_len_u64) orelse return error.IntegerOverflow;
+        const payload_header = try parseHeaderBytes(header_prefix);
+        const manifest_sig_len = std.math.cast(
+            usize,
+            payload_header.manifest_len + payload_header.metadata_signature_len,
+        ) orelse return error.IntegerOverflow;
 
-        const full_prefix = readTarEntryPrefixAlloc(allocator, reader, file, total_prefix_len) catch return error.InvalidTarArchive;
-        defer allocator.free(full_prefix);
+        const manifest_sig = try readTarEntryPrefixAlloc(allocator, reader, file, manifest_sig_len);
+        defer allocator.free(manifest_sig);
 
-        const manifest_start: usize = 24;
-        const manifest_end = manifest_start + (std.math.cast(usize, payload_header.manifest_len) orelse return error.IntegerOverflow);
-        const signature_end = manifest_end + (std.math.cast(usize, payload_header.metadata_signature_len) orelse return error.IntegerOverflow);
-
-        const manifest = try allocator.dupe(u8, full_prefix[manifest_start..manifest_end]);
+        const manifest = try allocator.dupe(u8, manifest_sig[0..payload_header.manifest_len]);
         errdefer allocator.free(manifest);
-        const signature = try allocator.dupe(u8, full_prefix[manifest_end..signature_end]);
+        const signature = try allocator.dupe(u8, manifest_sig[payload_header.manifest_len..]);
         return .{
             .manifest = manifest,
             .signature = signature,
@@ -159,14 +157,17 @@ fn readTarEntryPrefixAlloc(
     reader: *std.Io.Reader,
     file: std.tar.Iterator.File,
     prefix_len: usize,
-) ![]u8 {
+) Error![]u8 {
     if (prefix_len > file.size) return error.TarDecompressTruncated;
 
     const bytes = try allocator.alloc(u8, prefix_len);
     errdefer allocator.free(bytes);
     var writer: std.Io.Writer = .fixed(bytes);
 
-    reader.streamExact64(&writer, prefix_len) catch return error.TarDecompressTruncated;
+    reader.streamExact64(&writer, prefix_len) catch |err| switch (err) {
+        error.EndOfStream => return error.TarDecompressTruncated,
+        else => return error.ArchiveReadFailed,
+    };
     return bytes;
 }
 
@@ -181,31 +182,20 @@ fn attemptExtractPayloadFile(
     io: std.Io,
     iter: *std.tar.Iterator,
     file: std.tar.Iterator.File,
-    filename_buf: []u8,
     temp_base: TempBaseSelection,
-    allow_space_retry: bool,
-) Error!?TarExtractResult {
-    _ = filename_buf;
-
+) Error!TarExtractResult {
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
     const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ temp_base.base_path, nonce });
     errdefer allocator.free(dir_path);
 
-    createTempBaseIfNeeded(io, temp_base.base_path, temp_base.is_absolute) catch return error.IoFailure;
-    createTempDir(io, dir_path, temp_base.is_absolute) catch return error.IoFailure;
+    try createTempBaseIfNeeded(io, temp_base.base_path, temp_base.is_absolute);
+    try createTempDir(io, dir_path, temp_base.is_absolute);
     errdefer cleanupExtractedPayloadTempDir(io, dir_path) catch |cleanup_err| {
         std.log.warn("failed to cleanup temporary extraction directory '{s}': {}", .{ dir_path, cleanup_err });
     };
 
-    const extract_err = extractTarFileIntoDir(io, iter, file, dir_path, temp_base.is_absolute);
-    if (extract_err) |_| {} else |err| {
-        if (allow_space_retry and shouldRetryWithFallback(err)) {
-            allocator.free(dir_path);
-            return null;
-        }
-        return mapTarExtractError(err);
-    }
+    try extractTarFileIntoDir(io, iter, file, dir_path, temp_base.is_absolute);
 
     const payload_path = try std.fmt.allocPrint(allocator, "{s}/payload.bin", .{dir_path});
     return .{
@@ -215,12 +205,12 @@ fn attemptExtractPayloadFile(
     };
 }
 
-fn createTempDir(io: std.Io, dir_path: []const u8, is_absolute: bool) !void {
+fn createTempDir(io: std.Io, dir_path: []const u8, is_absolute: bool) Error!void {
     if (is_absolute) {
-        try std.Io.Dir.createDirAbsolute(io, dir_path, .default_dir);
+        std.Io.Dir.createDirAbsolute(io, dir_path, .default_dir) catch return error.TempDirectoryCreateFailed;
         return;
     }
-    try std.Io.Dir.cwd().createDir(io, dir_path, .default_dir);
+    std.Io.Dir.cwd().createDir(io, dir_path, .default_dir) catch return error.TempDirectoryCreateFailed;
 }
 
 fn extractTarFileIntoDir(
@@ -229,46 +219,33 @@ fn extractTarFileIntoDir(
     file: std.tar.Iterator.File,
     dir_path: []const u8,
     is_absolute: bool,
-) anyerror!void {
+) Error!void {
     var temp_dir = if (is_absolute)
-        try std.Io.Dir.openDirAbsolute(io, dir_path, .{})
+        std.Io.Dir.openDirAbsolute(io, dir_path, .{}) catch return error.TempDirectoryCreateFailed
     else
-        try std.Io.Dir.cwd().openDir(io, dir_path, .{});
+        std.Io.Dir.cwd().openDir(io, dir_path, .{}) catch return error.TempDirectoryCreateFailed;
     defer temp_dir.close(io);
 
-    var out_file = try temp_dir.createFile(io, "payload.bin", .{});
+    var out_file = temp_dir.createFile(io, "payload.bin", .{}) catch |err| switch (err) {
+        error.NoSpaceLeft, error.FileTooBig => return error.InsufficientDiskSpace,
+        else => return error.ArchiveWriteFailed,
+    };
     defer out_file.close(io);
 
     var buf: [65536]u8 = undefined;
     var remaining: u64 = file.size;
     while (remaining > 0) {
         const chunk_size = @min(buf.len, remaining);
-        iter.reader.readSliceAll(buf[0..chunk_size]) catch return error.IoFailure;
-        out_file.writeStreamingAll(io, buf[0..chunk_size]) catch return error.IoFailure;
+        iter.reader.readSliceAll(buf[0..chunk_size]) catch |err| switch (err) {
+            error.EndOfStream => return error.TarDecompressTruncated,
+            else => return error.ArchiveReadFailed,
+        };
+        out_file.writeStreamingAll(io, buf[0..chunk_size]) catch |err| switch (err) {
+            error.NoSpaceLeft, error.DiskQuota, error.FileTooBig => return error.InsufficientDiskSpace,
+            else => return error.ArchiveWriteFailed,
+        };
         remaining -= chunk_size;
     }
-}
-
-fn shouldRetryWithFallback(err: anyerror) bool {
-    return switch (err) {
-        error.NoSpaceLeft,
-        error.DiskQuota,
-        error.FileTooBig,
-        error.WriteFailed,
-        => true,
-        else => false,
-    };
-}
-
-fn mapTarExtractError(err: anyerror) Error {
-    return switch (err) {
-        error.NoSpaceLeft,
-        error.DiskQuota,
-        error.FileTooBig,
-        error.WriteFailed,
-        => error.IoFailure,
-        else => error.InvalidTarArchive,
-    };
 }
 
 const StatVfs = extern struct {
@@ -288,7 +265,11 @@ const StatVfs = extern struct {
 
 extern "c" fn statvfs(path: [*:0]const u8, buf: *StatVfs) c_int;
 
-fn selectTempBase(allocator: std.mem.Allocator, preferred_base: []const u8, required_bytes: u64) !TempBaseSelection {
+fn selectTempBase(
+    allocator: std.mem.Allocator,
+    preferred_base: []const u8,
+    required_bytes: u64,
+) Error!TempBaseSelection {
     const fallback_base = ".tmp";
     const preferred_available = getAvailableBytes(preferred_base) catch 0;
     if (preferred_available >= required_bytes) {
@@ -305,14 +286,14 @@ fn selectTempBase(allocator: std.mem.Allocator, preferred_base: []const u8, requ
     };
 }
 
-fn createTempBaseIfNeeded(io: std.Io, base_path: []const u8, is_absolute: bool) !void {
+fn createTempBaseIfNeeded(io: std.Io, base_path: []const u8, is_absolute: bool) Error!void {
     if (is_absolute) {
         std.Io.Dir.createDirAbsolute(io, base_path, .default_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
-            else => return err,
+            else => return error.TempDirectoryCreateFailed,
         };
     } else {
-        std.Io.Dir.cwd().createDirPath(io, base_path) catch return error.IoFailure;
+        std.Io.Dir.cwd().createDirPath(io, base_path) catch return error.TempDirectoryCreateFailed;
     }
 }
 
