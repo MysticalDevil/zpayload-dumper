@@ -229,7 +229,7 @@ pub fn run(
     // --- Phase 2: Prepare spill directory and memory budget ---
     const spill_dir = try std.fmt.allocPrint(allocator, "{s}/.zpayload_spill", .{output_dir});
     defer allocator.free(spill_dir);
-    std.Io.Dir.cwd().createDirPath(io, spill_dir) catch {};
+    std.Io.Dir.cwd().createDirPath(io, spill_dir) catch return error.IoFailure;
 
     var budget = MemoryBudget.init(256 * 1024 * 1024); // 256 MB
 
@@ -380,7 +380,9 @@ pub fn run(
     }
 
     // --- Phase 7: Cleanup spill directory ---
-    std.Io.Dir.cwd().deleteTree(io, spill_dir) catch {};
+    std.Io.Dir.cwd().deleteTree(io, spill_dir) catch |err| {
+        std.log.warn("failed to cleanup spill directory '{s}': {}", .{ spill_dir, err });
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +503,9 @@ fn workerMain(shared: *Shared) void {
                 var tmp_writer = tmp_file.writer(shared.io, &tmp_buf);
                 tmp_writer.interface.writeAll(data) catch |err| {
                     tmp_file.close(shared.io);
-                    std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch {};
+                    std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch |cleanup_err| {
+                        std.log.warn("failed to delete spill file '{s}': {}", .{ tmp_path, cleanup_err });
+                    };
                     shared.allocator.free(tmp_path);
                     part.pending_mutex.unlock(shared.io);
                     recordError(shared, part, task.operation_index, err);
@@ -511,7 +515,9 @@ fn workerMain(shared: *Shared) void {
                 };
                 tmp_writer.flush() catch |err| {
                     tmp_file.close(shared.io);
-                    std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch {};
+                    std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch |cleanup_err| {
+                        std.log.warn("failed to delete spill file '{s}': {}", .{ tmp_path, cleanup_err });
+                    };
                     shared.allocator.free(tmp_path);
                     part.pending_mutex.unlock(shared.io);
                     recordError(shared, part, task.operation_index, err);
@@ -525,7 +531,9 @@ fn workerMain(shared: *Shared) void {
                     .data = .{ .tmp_file = tmp_path },
                 }) catch {
                     part.pending_mutex.unlock(shared.io);
-                    std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch {};
+                    std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch |cleanup_err| {
+                        std.log.warn("failed to delete spill file '{s}': {}", .{ tmp_path, cleanup_err });
+                    };
                     shared.allocator.free(tmp_path);
                     recordError(shared, part, task.operation_index, error.OutOfMemory);
                     scheduleNextTask(shared, task.partition_index);
@@ -810,7 +818,9 @@ fn cleanupPendingData(io: std.Io, allocator: std.mem.Allocator, budget: *MemoryB
             allocator.free(mem);
         },
         .tmp_file => |path| {
-            std.Io.Dir.cwd().deleteFile(io, path) catch {};
+            std.Io.Dir.cwd().deleteFile(io, path) catch |err| {
+                std.log.warn("failed to delete spill file '{s}': {}", .{ path, err });
+            };
             allocator.free(path);
         },
     }

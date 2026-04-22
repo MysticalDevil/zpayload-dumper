@@ -186,6 +186,7 @@ pub const Payload = struct {
                 done.store(true, .release);
             }
         }.run, .{ &engine_err, &engine_done, self, &plan, output_dir, concurrency, &tracker, &collector, old_dir, bsdiff_enabled }) catch return error.IoFailure;
+        defer engine_thread.join();
 
         while (!engine_done.load(.acquire)) {
             const now_ns = std.Io.Timestamp.now(self.io, .awake).toNanoseconds();
@@ -200,15 +201,15 @@ pub const Payload = struct {
             sleep_result catch return error.IoFailure;
         }
 
-        engine_thread.join();
-
         sink.render_fn(&tracker, reporter, &prev_lines) catch |err| {
             std.log.warn("failed to render final progress: {}", .{err});
         };
 
         if (engine_err) |err| {
             if (collector.hasErrors()) {
-                sink.print_errors_fn(&collector, reporter) catch {};
+                sink.print_errors_fn(&collector, reporter) catch |print_err| {
+                    std.log.warn("failed to print worker errors: {}", .{print_err});
+                };
             }
             return err;
         }
@@ -257,6 +258,8 @@ pub const Payload = struct {
         const worker_count = @min(concurrency, plan.jobs.len);
         const threads = try self.allocator.alloc(std.Thread, worker_count);
         defer self.allocator.free(threads);
+        var spawned_threads: usize = 0;
+        defer for (threads[0..spawned_threads]) |thread| thread.join();
 
         var next_job = std.atomic.Value(usize).init(0);
         var completed_jobs = std.atomic.Value(usize).init(0);
@@ -271,6 +274,7 @@ pub const Payload = struct {
                 .worker_failed = &worker_failed,
                 .io = self.io,
             }}) catch return error.IoFailure;
+            spawned_threads += 1;
         }
 
         while (completed_jobs.load(.acquire) < jobs.items.len) {
@@ -285,9 +289,6 @@ pub const Payload = struct {
 
             self.io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch return error.IoFailure;
         }
-
-        for (threads) |thread| thread.join();
-
         sink.render_fn(&tracker, reporter, &prev_lines) catch |err| {
             std.log.warn("failed to render final dry-run progress: {}", .{err});
         };
