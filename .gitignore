@@ -9,6 +9,7 @@ extracted_*
 .rumdl_cache/
 docker/
 .codex
+.claude
 release/
 zig-pkg/
 run_bench_matrix.sh

@@ -148,7 +148,10 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 - `NO_COLOR`
 - `CLICOLOR=0`
 - `CLICOLOR_FORCE=1`
-- `TMPDIR`
+
+### 临时目录
+
+处理 `.zip` 或 `.tar`/`.tar.gz`/`.tgz` 输入时，程序会先将 `payload.bin` 提取到当前工作目录下 `./.tmp` 的临时目录中。临时目录会自动创建，并在提取完成后自动移除。
 
 ### 磁盘空间检查
 

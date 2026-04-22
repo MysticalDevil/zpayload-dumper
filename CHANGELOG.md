@@ -17,6 +17,7 @@
 - Memory-bounded pending queue (256 MB) with spill-to-temp fallback for out-of-order operations.
 - Progress tracking with TTY-aware rendering (dynamic multi-partition view vs line-based logs).
 - Environment variable color override (`ZPAYLOAD_COLOR`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`).
+- Centralized platform abstraction (`src/utils/platform.zig`) for OS-specific paths and APIs.
 
 ### Changed
 
@@ -27,6 +28,8 @@
 - `decompressZstdToWriter` and `decompressXzToWriter` now use `streamRemaining` API with a dedicated zstd window buffer.
 - `--format` CLI option syntax updated to `--format <mode>` with `--format=json` shorthand.
 - Updated distro support matrix: Ubuntu/Debian/Fedora now marked as "build from source" instead of "not supported".
+- **Simplified temp directory logic**: removed `TMPDIR` support and disk-space-based fallback. zip/tar extraction now always uses
+  `./.tmp` under the current working directory, and the temp directory is always auto-removed after extraction completes.
 
 ### Fixed
 
@@ -35,7 +38,7 @@
 - Worker and engine threads now use `defer join()` to guarantee cleanup on early returns.
 - `help.zig` no longer panics on `ZPAYLOAD_COLOR=` without a value.
 - `fs_hash.zig` now verifies read count matches expected bytes.
-- Fixed temp directory fallback logic when preferred temp base has insufficient space.
+- Eliminated hard-coded `/tmp` and `.tmp` paths by centralizing them in `src/utils/platform.zig`.
 
 ## [0.0.1] - 2026-04-20
 

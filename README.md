@@ -169,11 +169,15 @@ Environment variables:
 - `NO_COLOR`
 - `CLICOLOR=0`
 - `CLICOLOR_FORCE=1`
-- `TMPDIR`
+
+Temp directory:
+
+When processing `.zip` or `.tar`/`.tar.gz`/`.tgz` input, the tool extracts `payload.bin` to a temporary directory
+under `./.tmp` in the current working directory. The temp directory is automatically created and removed after extraction completes.
 
 Disk space check:
 
-Before extraction begins, the tool checks available disk space. If the output directory does not have enough free
+Before extraction begins, the tool checks available disk space in the output directory. If there is not enough free
 space for the selected partitions, extraction aborts immediately with a clear error message showing required vs available space.
 
 Examples:

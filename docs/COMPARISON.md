@@ -423,13 +423,13 @@ At ~650 lines of core code vs ~2,900, the Go version is **dramatically easier to
 # Go: one command, zero system dependencies
 go build
 
-# Zig: requires system C libraries to be installed
-zig build   # fails if upb, lzma, bz2, zstd are missing
+# Zig: requires a few system C libraries
+zig build   # fails if upb, utf8_range, or bz2 are missing
 ```
 
 The Go version bundles all compression libraries through pure-Go or cgo-wrapped modules (`gozstd`, `go-xz`, standard
-`compress/bzip2`). The Zig version requires the user to install native system libraries (`upb`, `utf8_range`, `lzma`, `bz2`,
-`zstd`) before compilation.
+`compress/bzip2`). The Zig version uses Zig's native `std.compress` for XZ and Zstd, so the only remaining system
+dependencies are `upb`, `utf8_range`, and `bz2` for protobuf parsing and bzip2 decompression.
 
 ### 10.3 Memory Safety Without Effort
 
@@ -461,10 +461,10 @@ overhead and increases the risk of bugs.
 GOOS=windows GOARCH=amd64 go build
 
 # Zig: also excellent cross-compilation, but requires C library cross-compilation too
-zig build -Dtarget=x86_64-windows-gnu   # need Windows upb/lzma/bz2/zstd
+zig build -Dtarget=x86_64-windows-gnu   # need Windows upb/utf8_range/bz2
 ```
 
-Go's pure-Go dependencies make cross-compilation straightforward. Zig's C dependencies (`upb`, `bz2`, etc.) require either
+Go's pure-Go dependencies make cross-compilation straightforward. Zig's C dependencies (`upb`, `utf8_range`, `bz2`) require either
 cross-compiled versions of those libraries or building them from source for the target.
 
 ### 10.6 Concurrency Model Clarity
