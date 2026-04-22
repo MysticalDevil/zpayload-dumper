@@ -51,6 +51,7 @@ pub fn buildPlan(
     var partition_index: usize = 0;
     while (partition_index < part_count) : (partition_index += 1) {
         const name_raw = ctx.partitionName(partition_index) orelse continue;
+        try validatePartitionName(name_raw);
         if (selected.len != 0 and !containsPartition(selected, name_raw)) continue;
 
         const name = try aa.dupe(u8, name_raw);
@@ -171,4 +172,33 @@ fn containsPartition(parts: []const []const u8, name: []const u8) bool {
         if (std.mem.eql(u8, part, name)) return true;
     }
     return false;
+}
+
+fn validatePartitionName(name: []const u8) Error!void {
+    if (name.len == 0) return error.InvalidPartitionName;
+    if (std.fs.path.isAbsolute(name)) return error.InvalidPartitionName;
+
+    var components = std.mem.splitScalar(u8, name, '/');
+    while (components.next()) |component| {
+        if (component.len == 0) return error.InvalidPartitionName;
+        if (std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, "..")) {
+            return error.InvalidPartitionName;
+        }
+    }
+
+    if (std.mem.indexOfScalar(u8, name, '\\') != null) return error.InvalidPartitionName;
+}
+
+test "validatePartitionName accepts normal Android partition names" {
+    try validatePartitionName("boot");
+    try validatePartitionName("vendor_boot");
+    try validatePartitionName("system_ext");
+}
+
+test "validatePartitionName rejects traversal and path separators" {
+    try std.testing.expectError(error.InvalidPartitionName, validatePartitionName("../boot"));
+    try std.testing.expectError(error.InvalidPartitionName, validatePartitionName("/boot"));
+    try std.testing.expectError(error.InvalidPartitionName, validatePartitionName("vendor/boot"));
+    try std.testing.expectError(error.InvalidPartitionName, validatePartitionName("vendor\\boot"));
+    try std.testing.expectError(error.InvalidPartitionName, validatePartitionName(".."));
 }

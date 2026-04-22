@@ -13,6 +13,7 @@ fn suggestionForError(err: Error) ?[]const u8 {
         error.PayloadNotFoundInZip => "ensure the zip archive contains payload.bin",
         error.InvalidMagic => "ensure the file is a valid payload.bin (expected CrAU header)",
         error.UnsupportedPayloadVersion => "ensure the payload uses version 2",
+        error.InvalidPartitionName => "ensure the payload manifest does not contain unsafe partition names",
         error.InsufficientDiskSpace => "specify a different output directory with -o or free up disk space",
         error.MissingOldImage => "this is a delta payload; use --old <dir> to provide source partition images",
         error.IoFailure => "verify the file path is correct and the file is readable",

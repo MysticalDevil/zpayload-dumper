@@ -12,6 +12,7 @@ pub fn userMessage(err: Error) []const u8 {
         error.ManifestNotInitialized => "payload manifest is not initialized",
         error.DecodeFailed => "failed to decode protobuf manifest/signature",
         error.InvalidDstExtents => "invalid destination extents in operation",
+        error.InvalidPartitionName => "invalid partition name in payload manifest",
         error.UnhandledOperationType => "unsupported payload operation type",
         error.MissingOldImage => "source partition images required for delta payload",
         error.DecompressedSizeMismatch => "decompressed size mismatch",
