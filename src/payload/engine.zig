@@ -494,33 +494,36 @@ fn workerMain(shared: *Shared) void {
                 var tmp_file = std.Io.Dir.cwd().createFile(shared.io, tmp_path, .{ .truncate = true }) catch |err| {
                     part.pending_mutex.unlock(shared.io);
                     shared.allocator.free(tmp_path);
-                    recordError(shared, part, task.operation_index, err);
+                    recordError(shared, part, task.operation_index, switch (err) {
+                        error.NoSpaceLeft, error.FileTooBig => error.InsufficientDiskSpace,
+                        else => error.IoFailure,
+                    });
                     scheduleNextTask(shared, task.partition_index);
                     finishTask(shared, task.partition_index, false);
                     continue;
                 };
                 var tmp_buf: [64 * 1024]u8 = undefined;
                 var tmp_writer = tmp_file.writer(shared.io, &tmp_buf);
-                tmp_writer.interface.writeAll(data) catch |err| {
+                tmp_writer.interface.writeAll(data) catch {
                     tmp_file.close(shared.io);
                     std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch |cleanup_err| {
                         std.log.warn("failed to delete spill file '{s}': {}", .{ tmp_path, cleanup_err });
                     };
                     shared.allocator.free(tmp_path);
                     part.pending_mutex.unlock(shared.io);
-                    recordError(shared, part, task.operation_index, err);
+                    recordError(shared, part, task.operation_index, mapSpillWriterError(&tmp_writer));
                     scheduleNextTask(shared, task.partition_index);
                     finishTask(shared, task.partition_index, false);
                     continue;
                 };
-                tmp_writer.flush() catch |err| {
+                tmp_writer.flush() catch {
                     tmp_file.close(shared.io);
                     std.Io.Dir.cwd().deleteFile(shared.io, tmp_path) catch |cleanup_err| {
                         std.log.warn("failed to delete spill file '{s}': {}", .{ tmp_path, cleanup_err });
                     };
                     shared.allocator.free(tmp_path);
                     part.pending_mutex.unlock(shared.io);
-                    recordError(shared, part, task.operation_index, err);
+                    recordError(shared, part, task.operation_index, mapSpillWriterError(&tmp_writer));
                     scheduleNextTask(shared, task.partition_index);
                     finishTask(shared, task.partition_index, false);
                     continue;
@@ -826,7 +829,15 @@ fn cleanupPendingData(io: std.Io, allocator: std.mem.Allocator, budget: *MemoryB
     }
 }
 
-fn recordError(shared: *Shared, part: *PartitionWriteState, operation_index: usize, err: anyerror) void {
+fn mapSpillWriterError(writer: *const std.Io.File.Writer) Error {
+    const err = writer.err orelse return error.IoFailure;
+    return switch (err) {
+        error.NoSpaceLeft, error.DiskQuota, error.FileTooBig => error.InsufficientDiskSpace,
+        else => error.IoFailure,
+    };
+}
+
+fn recordError(shared: *Shared, part: *PartitionWriteState, operation_index: usize, err: Error) void {
     const msg = if (err == error.MissingOldImage)
         std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s} (use --old <dir> to provide source partition images for delta payload)", .{
             part.job.name,
