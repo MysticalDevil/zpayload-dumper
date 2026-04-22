@@ -37,8 +37,9 @@ fn suggestionForError(err: Error) ?[]const u8 {
 
 pub fn main(init: std.process.Init) !void {
     const effective_init = init;
-    // TODO: re-enable when std.Io.Uring compiles without error set mismatches.
-    // See: https://github.com/ziglang/zig/pull/...
+    // NOTE: io_uring backend is disabled. Zig's std.Io.Uring compiles with a
+    // patch (PR #31764) but still segfaults at runtime in CancelRegion.init.
+    // Re-enable after upstream stabilizes the fiber/thread context switch path.
     // var uring_storage: std.Io.Uring = undefined;
     // var use_uring = false;
     // if (builtin.os.tag == .linux) {
