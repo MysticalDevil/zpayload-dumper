@@ -37,7 +37,8 @@ fn suggestionForError(err: Error) ?[]const u8 {
 
 pub fn main(init: std.process.Init) !void {
     const effective_init = init;
-    // TODO: re-enable when Zig 0.16 std.Io.Uring compiles without error set mismatches.
+    // TODO: re-enable when std.Io.Uring compiles without error set mismatches.
+    // See: https://github.com/ziglang/zig/pull/...
     // var uring_storage: std.Io.Uring = undefined;
     // var use_uring = false;
     // if (builtin.os.tag == .linux) {
