@@ -13,7 +13,7 @@ check_e2e:
     zig build check_e2e
 
 sim_test name="just-sim":
-    python3 scripts/generate_sample_payload.py --name {{name}}
+    uv run --project scripts zpayload-generate-sample --name {{name}}
     zig build check_e2e -- tests/data/generated/{{name}}/payload.bin tests/data/generated/{{name}}/extracted
 
 bench_smoke:

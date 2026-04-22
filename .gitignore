@@ -13,3 +13,6 @@ release/
 zig-pkg/
 run_bench_matrix.sh
 .docker/
+scripts/.venv/
+*.egg-info/
+__pycache__/
