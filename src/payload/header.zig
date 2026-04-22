@@ -10,9 +10,9 @@ pub const Header = struct {
 };
 
 pub fn readHeader(file: std.Io.File, io: std.Io) Error!Header {
-    const magic = try readAtAlloc(std.heap.page_allocator, file, io, 0, 4);
-    defer std.heap.page_allocator.free(magic);
-    if (!std.mem.eql(u8, magic, "CrAU")) return error.InvalidMagic;
+    var magic: [4]u8 = undefined;
+    try readPositionalExact(file, io, &magic, 0);
+    if (!std.mem.eql(u8, &magic, "CrAU")) return error.InvalidMagic;
 
     const version = try readU64Be(file, io, 4);
     if (version != 2) return error.UnsupportedPayloadVersion;

@@ -213,9 +213,12 @@ fn writeExampleLine(writer: *std.Io.Writer, theme: Theme, line: []const u8) !voi
         if (std.mem.eql(u8, part, "zpayload-dumper")) {
             try theme.write(writer, .command, part);
         } else if (std.mem.startsWith(u8, part, "ZPAYLOAD_COLOR=")) {
-            const eq_index = std.mem.indexOfScalar(u8, part, '=') orelse unreachable;
-            try theme.write(writer, .literal, part[0 .. eq_index + 1]);
-            try theme.write(writer, .context_value, part[eq_index + 1 ..]);
+            if (std.mem.indexOfScalar(u8, part, '=')) |eq_index| {
+                try theme.write(writer, .literal, part[0 .. eq_index + 1]);
+                try theme.write(writer, .context_value, part[eq_index + 1 ..]);
+            } else {
+                try theme.write(writer, .literal, part);
+            }
         } else if (std.mem.startsWith(u8, part, "--") or std.mem.startsWith(u8, part, "-")) {
             try theme.write(writer, .literal, part);
         } else if (std.mem.startsWith(u8, part, "/") or std.mem.endsWith(u8, part, ".bin") or std.mem.endsWith(u8, part, ".zip")) {

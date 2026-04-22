@@ -73,11 +73,15 @@ pub const ProgressTracker = struct {
         allocator.free(self.entries);
     }
 
+    fn markDirty(self: *ProgressTracker) void {
+        self.dirty.store(true, .release);
+    }
+
     pub fn markRunning(self: *ProgressTracker, idx: usize) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .running;
-        if (self.dirty.swap(true, .release)) {}
+        self.markDirty();
     }
 
     pub fn markDone(self: *ProgressTracker, idx: usize) void {
@@ -85,14 +89,14 @@ pub const ProgressTracker = struct {
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .done;
         self.entries[idx].done_ops = self.entries[idx].total_ops;
-        if (self.dirty.swap(true, .release)) {}
+        self.markDirty();
     }
 
     pub fn markFailed(self: *ProgressTracker, idx: usize) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         self.entries[idx].state = .failed;
-        if (self.dirty.swap(true, .release)) {}
+        self.markDirty();
     }
 
     pub fn updateOps(self: *ProgressTracker, idx: usize, done_ops: usize) void {
@@ -100,7 +104,7 @@ pub const ProgressTracker = struct {
         defer self.mutex.unlock(self.io);
         if (self.entries[idx].done_ops != done_ops) {
             self.entries[idx].done_ops = done_ops;
-            if (self.dirty.swap(true, .release)) {}
+            self.markDirty();
         }
     }
 

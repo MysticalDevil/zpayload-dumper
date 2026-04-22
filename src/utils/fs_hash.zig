@@ -12,7 +12,8 @@ pub fn hashFileAtPath(allocator: std.mem.Allocator, io: std.Io, path: []const u8
     var off: u64 = 0;
     while (off < stat.size) {
         const n: usize = @intCast(@min(stat.size - off, buf.len));
-        _ = try file.readPositionalAll(io, buf[0..n], off);
+        const read_count = try file.readPositionalAll(io, buf[0..n], off);
+        if (read_count != n) return error.UnexpectedEndOfFile;
         hasher.update(buf[0..n]);
         off += n;
     }

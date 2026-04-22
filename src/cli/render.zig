@@ -60,11 +60,7 @@ pub fn renderProgress(tracker: *progress.ProgressTracker, reporter: *const progr
 
         render_style.clearLine(out) catch return error.IoFailure;
         const done = @min(entry.done_ops, entry.total_ops);
-        const row_state: render_style.RowState = switch (entry.state) {
-            .running => .running,
-            .failed => .failed,
-            else => unreachable,
-        };
+        const row_state: render_style.RowState = if (entry.state == .running) .running else .failed;
         render_style.writeRow(out, reporter.use_color, render_style.default_style, row_state, entry.name, done, entry.total_ops) catch return error.IoFailure;
         rendered_lines += 1;
     }
