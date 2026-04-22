@@ -43,7 +43,12 @@ pub fn decompressBz2ToWriter(
 ) Error!usize {
     var stream: c.bz_stream = std.mem.zeroes(c.bz_stream);
     if (c.BZ2_bzDecompressInit(&stream, 0, 0) != c.BZ_OK) return error.Bzip2DecompressFailed;
-    errdefer _ = c.BZ2_bzDecompressEnd(&stream);
+    errdefer {
+        const rc = c.BZ2_bzDecompressEnd(&stream);
+        if (rc != c.BZ_OK) {
+            std.log.warn("BZ2_bzDecompressEnd failed during streaming cleanup: rc={d}", .{rc});
+        }
+    }
 
     var remaining = compressed_len;
     var pos = offset;

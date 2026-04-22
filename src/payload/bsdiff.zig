@@ -21,7 +21,12 @@ fn offtin(buf: *const [8]u8) i64 {
 fn decompressBz2Block(allocator: std.mem.Allocator, input: []const u8) Error![]u8 {
     var stream: c.bz_stream = std.mem.zeroes(c.bz_stream);
     if (c.BZ2_bzDecompressInit(&stream, 0, 0) != c.BZ_OK) return error.Bzip2DecompressFailed;
-    defer _ = c.BZ2_bzDecompressEnd(&stream);
+    defer {
+        const rc = c.BZ2_bzDecompressEnd(&stream);
+        if (rc != c.BZ_OK) {
+            std.log.warn("BZ2_bzDecompressEnd failed during bsdiff cleanup: rc={d}", .{rc});
+        }
+    }
 
     var result = std.array_list.Managed(u8).init(allocator);
     errdefer result.deinit();
