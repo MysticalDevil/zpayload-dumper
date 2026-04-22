@@ -129,6 +129,8 @@ The artifact is placed in `release/` with `SHA256SUMS`.
 > **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch.
 >
 > **Async experiment:** The [`feat/async-engine`](../../tree/feat/async-engine) branch replaces the manual thread pool with `std.Io.Group.concurrent` and is ready for `std.Io.Uring` (io_uring) once upstream stabilizes the runtime. Zig 0.16.0's `std.Io.Uring` requires compile-fix [PR #31764](https://codeberg.org/ziglang/zig/pulls/31764) (`ReadOnlyFileSystem` missing from `Dir.OpenError` / `Dir.RealPathFileError`) and still segfaults at runtime in `CancelRegion.init` during fiber context switches, so the backend remains disabled on that branch.
+>
+> **libxev experiment:** The [`feat/libxev-engine`](../../tree/feat/libxev-engine) branch replaces the manual thread pool with [mitchellh/libxev](https://github.com/mitchellh/libxev) `ThreadPool`. It compiles and passes all tests, but shows no performance improvement over manual threads on this CPU-bound workload (within measurement noise). The dependency is integrated via `build.zig.zon`.
 
 ## Usage
 

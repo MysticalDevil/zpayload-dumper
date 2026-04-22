@@ -90,6 +90,8 @@ zig build -Dbsdiff
 > **平台支持：** `main` 分支仅针对 Linux。Windows 交叉编译和原生构建在 [`feat/windows-support`](../../tree/feat/windows-support) 分支维护。
 >
 > **异步实验：** [`feat/async-engine`](../../tree/feat/async-engine) 分支将手动线程池替换为 `std.Io.Group.concurrent`，并可在上游稳定运行后接入 `std.Io.Uring`（io_uring）。Zig 0.16.0 的 `std.Io.Uring` 需要编译修复 [PR #31764](https://codeberg.org/ziglang/zig/pulls/31764)（`Dir.OpenError` / `Dir.RealPathFileError` 缺少 `ReadOnlyFileSystem`），但即使修复后运行时仍会在 `CancelRegion.init` 的 fiber 上下文切换中崩溃，因此该后端在该分支上保持禁用。
+>
+> **libxev 实验：** [`feat/libxev-engine`](../../tree/feat/libxev-engine) 分支将手动线程池替换为 [mitchellh/libxev](https://github.com/mitchellh/libxev) 的 `ThreadPool`。该分支编译通过且所有测试通过，但在此 CPU 密集型负载上没有表现出相对手动线程的性能提升（在测量误差范围内）。依赖通过 `build.zig.zon` 集成。
 
 ## 用法
 
