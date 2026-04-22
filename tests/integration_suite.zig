@@ -9,6 +9,10 @@ fn testOutputPath(allocator: std.mem.Allocator, tmp_sub_path: []const u8, suffix
     return std.fmt.allocPrint(allocator, "{s}/tmp/{s}/{s}", .{ build_options.local_cache_dir, tmp_sub_path, suffix });
 }
 
+fn generatedFixturePath(allocator: std.mem.Allocator, name: []const u8, suffix: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "tests/data/generated/{s}/{s}", .{ name, suffix });
+}
+
 const TestReporter = struct {
     out_buf: [64]u8 = undefined,
     err_buf: [64]u8 = undefined,
@@ -240,4 +244,32 @@ test "zip extraction falls back to workspace tmp when preferred temp base is una
     try std.testing.expect(extracted.used_fallback_tmp);
     try std.testing.expect(std.mem.startsWith(u8, extracted.temp_dir, ".tmp/"));
     try std.testing.expect(app.fs_hash.fileExists(io, extracted.payload_path));
+}
+
+test "bench512 modem partition extracts successfully" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const payload_path = try generatedFixturePath(allocator, "bench512", "payload.bin");
+    defer allocator.free(payload_path);
+    const modem_expected = try generatedFixturePath(allocator, "bench512", "extracted/modem.img");
+    defer allocator.free(modem_expected);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out_dir = try testOutputPath(allocator, tmp.sub_path[0..], "bench512_modem");
+    defer allocator.free(out_dir);
+    try std.Io.Dir.cwd().createDirPath(io, out_dir);
+
+    var reporter_holder = TestReporter.init();
+
+    var p = try app.payload.Payload.open(allocator, io, payload_path);
+    defer p.deinit();
+    try p.init();
+    try p.extractSelected(out_dir, &.{"modem"}, 4, &reporter_holder.reporter, app.payload.Sink.noop, null, false);
+
+    const modem_out = try std.fmt.allocPrint(allocator, "{s}/modem.img", .{out_dir});
+    defer allocator.free(modem_out);
+    try app.fs_hash.assertFileHashEqual(allocator, io, modem_expected, modem_out);
 }
