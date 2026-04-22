@@ -277,7 +277,7 @@ zpayload-dumper/
 │   ├── smoke_benchmark.zig
 │   └── pressure_benchmark.zig
 └── scripts/
-    └── src/payload_gen/
+    └── payload_gen/
 ```
 
 - **Layered architecture**: CLI / payload core / FFI / input are separate modules.

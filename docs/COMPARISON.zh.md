@@ -266,7 +266,7 @@ zpayload-dumper/
 │   ├── smoke_benchmark.zig
 │   └── pressure_benchmark.zig
 └── scripts/
-    └── src/payload_gen/
+    └── payload_gen/
 ```
 
 - **分层架构**：CLI / payload 核心 / FFI / input 为独立模块。
