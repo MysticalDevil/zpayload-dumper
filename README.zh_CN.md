@@ -155,6 +155,10 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 
 ## 开发
 
+Python 辅助工具位于 `scripts/`，现在是标准的 `uv` 管理工程。
+生成测试夹具或运行 Python 辅助命令时，统一使用 `uv run --project scripts payload-gen ...`。
+详细说明见 [`docs/PYTHON_GENERATORS.zh.md`](docs/PYTHON_GENERATORS.zh.md)。
+
 ### 运行测试
 
 ```bash
@@ -206,7 +210,7 @@ zig build bench_pressure -- /path/to/payload.bin
 ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
 
 测试样本是一个 **78 MB** 的合成 payload
-（`scripts/generate_sample_payload.py --total-mb 128`），
+（`uv run --project scripts payload-gen sample --total-mb 128`），
 包含 `REPLACE`、`REPLACE_XZ`、`REPLACE_BZ`、`ZSTD` 和 `ZERO` 五种操作类型。
 
 | 场景 | 并发数 | zpayload-dumper | payload-dumper-go | 加速比 |
@@ -235,11 +239,17 @@ ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
 用于本地测试或持续集成，可以生成合成 payload 和对应的预期输出：
 
 ```bash
+uv sync --project scripts
+
 # 小型样本（默认，约 56 KB payload）
-python3 scripts/generate_sample_payload.py --name smoke1
+uv run --project scripts payload-gen sample --name smoke1
 
 # 大型样本，用于性能测试（约 80 MB payload，128 MB 原始数据）
-python3 scripts/generate_sample_payload.py --name bench128 --total-mb 128
+uv run --project scripts payload-gen sample --name bench128 --total-mb 128
+
+# 负例夹具
+uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
+uv run --project scripts payload-gen sample --name fixture-matrix --scenario all --total-mb 32
 ```
 
 输出会放到 `tests/data/`（该目录被 git 忽略），然后可以验证：
@@ -248,6 +258,38 @@ python3 scripts/generate_sample_payload.py --name bench128 --total-mb 128
 zig build run -- -o tmp/smoke1_out tests/data/generated/smoke1/payload.bin
 zig build run -- -o tmp/smoke1_zip_out tests/data/generated/smoke1/ota_update.zip
 ```
+
+可以通过下面的命令列出所有合成场景：
+
+```bash
+uv run --project scripts payload-gen sample --list-scenarios
+```
+
+生成 `SOURCE_BSDIFF` 增量 payload：
+
+```bash
+uv run --project scripts payload-gen delta \
+  --old old_boot.img \
+  --new new_boot.img \
+  --partition-name boot \
+  --output test_payload.bin
+```
+
+生成可直接做端到端测试的完整夹具目录：
+
+```bash
+uv run --project scripts payload-gen delta \
+  --old old_boot.img \
+  --new new_boot.img \
+  --partition-name boot \
+  --output tests/data/generated/bsdiff-fixture/payload.bin \
+  --bundle-dir tests/data/generated/bsdiff-fixture
+```
+
+这个目录会同时包含 `payload.bin`、`ota_update.zip`、`old/boot.img`、
+`extracted/boot.img` 和 `manifest.textproto`。生成出的 manifest 会带上
+`data_sha256_hash` 和 `src_sha256_hash`，因此能覆盖真实的
+`SOURCE_BSDIFF` 校验路径。
 
 ## 支持的 Payload 特性
 
