@@ -1,14 +1,27 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "zpayload-dumper-scripts"
 version = "0.1.0"
 description = "Helper scripts for zpayload-dumper"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "bsdiff4>=1.2.0",
     "protobuf>=4.0",
 ]
 
-[project.optional-dependencies]
+[project.scripts]
+payload-gen = "payload_gen.main:main"
+
+[dependency-groups]
 dev = [
-    "pytest",
+    "pytest>=8.0.0",
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
