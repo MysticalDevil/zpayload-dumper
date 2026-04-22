@@ -614,14 +614,12 @@ fn materializeOperationBuffer(
         .zstd => try compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
         .zero => try materializeZeroBuffer(shared, op, hasher, buffer, zero_buf),
         .source_copy => try materializeSourceCopy(shared, partition_name, op, hasher, buffer),
-        .source_bsdiff => try materializeSourceBsdiff(shared, partition_name, op, hasher, buffer),
+        .source_bsdiff => try materializeSourceBsdiff(shared, partition_name, op, buffer),
         else => return error.UnhandledOperationType,
     };
 
-    if (op.sha256) |expected| {
-        var hash: [32]u8 = undefined;
-        hasher.final(&hash);
-        if (!std.mem.eql(u8, expected, &hash)) return error.ChecksumMismatch;
+    if (op.op_type != .source_bsdiff) {
+        try verifySha256Hash(op.sha256, hasher);
     }
     if (written != op.expected_uncompressed) return error.UnexpectedBytesWritten;
     return written;
@@ -631,7 +629,6 @@ fn materializeSourceBsdiff(
     shared: *Shared,
     partition_name: []const u8,
     op: extract_plan.Operation,
-    hasher: *std.crypto.hash.sha2.Sha256,
     buffer: *std.Io.Writer.Allocating,
 ) Error!usize {
     if (!shared.bsdiff_enabled) return error.UnhandledOperationType;
@@ -679,11 +676,11 @@ fn materializeSourceBsdiff(
             pos += n;
         }
     }
+    try verifySha256Bytes(op.sha256, patch_data);
 
     const result = bsdiff.applyPatch(shared.allocator, old_data.items, patch_data, @intCast(op.expected_uncompressed)) catch |err| return err;
     defer shared.allocator.free(result);
 
-    hasher.update(result);
     buffer.writer.writeAll(result) catch return error.IoFailure;
     return result.len;
 }
@@ -834,4 +831,28 @@ fn recordError(shared: *Shared, part: *PartitionWriteState, operation_index: usi
         }) catch null;
     if (msg) |m| shared.collector.addOwned(m);
     part.has_errors.store(true, .release);
+}
+
+fn verifySha256Hash(expected: ?[]const u8, hasher: *std.crypto.hash.sha2.Sha256) Error!void {
+    if (expected) |value| {
+        var hash: [32]u8 = undefined;
+        hasher.final(&hash);
+        if (!std.mem.eql(u8, value, &hash)) return error.ChecksumMismatch;
+    }
+}
+
+fn verifySha256Bytes(expected: ?[]const u8, data: []const u8) Error!void {
+    if (expected) |value| {
+        var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+        hasher.update(data);
+        try verifySha256Hash(value, &hasher);
+    }
+}
+
+test "verifySha256Bytes matches SOURCE_BSDIFF patch blob semantics" {
+    var patch_hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash("patch-bytes", &patch_hash, .{});
+
+    try verifySha256Bytes(&patch_hash, "patch-bytes");
+    try std.testing.expectError(error.ChecksumMismatch, verifySha256Bytes(&patch_hash, "patched-output"));
 }
