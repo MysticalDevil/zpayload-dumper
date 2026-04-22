@@ -9,7 +9,7 @@
 - ZIP64 extra field parsing and local/central directory cross-validation for zip input.
 - TAR input support (`.tar`, `.tar.gz`, `.tgz`) with automatic payload.bin extraction.
 - `payload-gen` CLI for generating synthetic test samples and delta payloads (replaces standalone Python scripts).
-- `docs/PYTHON_GENERATORS.md` and `docs/PYTHON_GENERATORS.zh.md` documenting the Python tooling.
+- `scripts/README.md` and `scripts/README.zh.md` documenting the Python tooling.
 - Integration test for bench512 modem partition extraction.
 - Unit tests for bsdiff patch application.
 - Dry-run mode (`--dry-run`) for simulating extraction without writing output.
