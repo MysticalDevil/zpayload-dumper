@@ -133,7 +133,7 @@ direct-write is the sole reason for the 3–5.5× speedup.
 
 ### 4.2 Synthetic Payload Benchmarks
 
-All payloads were generated with `scripts/generate_sample_payload.py` (seed=42)
+All payloads were generated with `payload-gen sample` (seed=42)
 and exercise `REPLACE`, `REPLACE_XZ`, `REPLACE_BZ`, `ZSTD`, and `ZERO` operations.
 
 | Name | Payload size | Raw partition total |
@@ -269,7 +269,7 @@ zpayload-dumper/
 │   ├── smoke_benchmark.zig
 │   └── pressure_benchmark.zig
 └── scripts/
-    └── generate_sample_payload.py
+    └── src/payload_gen/
 ```
 
 - **Layered architecture**: CLI / payload core / FFI / input are separate modules.

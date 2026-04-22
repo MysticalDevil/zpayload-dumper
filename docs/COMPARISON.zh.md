@@ -127,7 +127,7 @@ Go 版本在架构上与我们的基线相同：**分区级并行，无分区内
 
 ### 4.2 合成 Payload 基准测试
 
-所有 payload 均由 `scripts/generate_sample_payload.py`（seed=42）生成，
+所有 payload 均由 `payload-gen sample`（seed=42）生成，
 涵盖 `REPLACE`、`REPLACE_XZ`、`REPLACE_BZ`、`ZSTD` 和 `ZERO` 操作。
 
 | 名称 | Payload 大小 | 原始分区总计 |
@@ -258,7 +258,7 @@ zpayload-dumper/
 │   ├── smoke_benchmark.zig
 │   └── pressure_benchmark.zig
 └── scripts/
-    └── generate_sample_payload.py
+    └── src/payload_gen/
 ```
 
 - **分层架构**：CLI / payload 核心 / FFI / input 为独立模块。

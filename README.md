@@ -145,7 +145,8 @@ Options:
 - `--color`: alias for `--color=always`
 - `--color=<mode>`: color mode, one of `auto`, `always`, `never`
 - `--no-color`: alias for `--color=never`
-- `--format=<mode>`: output format, one of `text`, `json` (affects `--version` and `--list` output)
+- `--format <mode>`: output format, one of `text`, `json` (affects `--version` and `--list` output)
+- `--format=json`: shorthand for JSON output
 
 If `-o` is omitted, the default output directory is generated as local time:
 `extracted_YYYYMMDD_HHMMSS`.

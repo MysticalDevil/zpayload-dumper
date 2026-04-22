@@ -122,7 +122,8 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 | `--color` | 等价于 `--color=always` |
 | `--color=<mode>` | 颜色模式：`auto`、`always`、`never` |
 | `--no-color` | 等价于 `--color=never` |
-| `--format=<mode>` | 输出格式：`text`、`json`（影响 `--version` 和 `--list` 输出） |
+| `--format <mode>` | 输出格式：`text`、`json`（影响 `--version` 和 `--list` 输出） |
+| `--format=json` | JSON 输出的简写形式 |
 
 ### 错误处理
 
