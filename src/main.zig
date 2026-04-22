@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const errors = @import("errors.zig");
 const app = @import("root.zig");
@@ -35,11 +36,26 @@ fn suggestionForError(err: Error) ?[]const u8 {
 }
 
 pub fn main(init: std.process.Init) !void {
-    const io = init.io;
+    const effective_init = init;
+    // TODO: re-enable when Zig 0.16 std.Io.Uring compiles without error set mismatches.
+    // var uring_storage: std.Io.Uring = undefined;
+    // var use_uring = false;
+    // if (builtin.os.tag == .linux) {
+    //     if (init.environ_map.get("ZPAYLOAD_IO")) |value| {
+    //         if (std.mem.eql(u8, value, "uring")) {
+    //             try std.Io.Uring.init(&uring_storage, init.gpa, .{});
+    //             effective_init.io = uring_storage.io();
+    //             use_uring = true;
+    //         }
+    //     }
+    // }
+    // defer if (use_uring) uring_storage.deinit();
+
+    const io = effective_init.io;
     var stderr_file = std.Io.File.stderr();
     var stderr = stderr_file.writer(io, &.{});
 
-    run(init, &stderr.interface) catch |err| switch (err) {
+    run(effective_init, &stderr.interface) catch |err| switch (err) {
         error.Usage => std.process.exit(2),
         else => {
             const detail = errors.detail(err);

@@ -270,8 +270,6 @@ pub fn run(
     }
 
     const worker_count = @min(concurrency, total_tasks);
-    const threads = try allocator.alloc(std.Thread, worker_count);
-    defer allocator.free(threads);
 
     var shared = Shared{
         .payload_file = payload_file,
@@ -293,14 +291,17 @@ pub fn run(
         .allocator = allocator,
     };
 
-    for (threads) |*thread| {
-        thread.* = std.Thread.spawn(.{}, workerMain, .{&shared}) catch return error.IoFailure;
+    var group = std.Io.Group.init;
+    for (0..worker_count) |_| {
+        group.concurrent(io, workerMain, .{&shared}) catch |err| switch (err) {
+            error.ConcurrencyUnavailable => return error.IoFailure,
+        };
     }
+    group.await(io) catch |err| switch (err) {
+        error.Canceled => return error.IoFailure,
+    };
 
-    // --- Phase 5: Wait for all workers ---
-    for (threads) |thread| thread.join();
-
-    // --- Phase 6: Drain any leftover pending ops on main thread ---
+    // --- Phase 5: Drain any leftover pending ops on main thread ---
     for (partitions, 0..) |*part, pidx| {
         if (part.has_errors.load(.acquire)) {
             tracker.markFailed(pidx);
