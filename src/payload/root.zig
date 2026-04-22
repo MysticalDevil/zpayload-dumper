@@ -228,8 +228,6 @@ pub const Payload = struct {
         old_dir: ?[]const u8,
         bsdiff_enabled: bool,
     ) Error!void {
-        _ = old_dir;
-        _ = bsdiff_enabled;
         if (!self.ctx_initialized) return error.ManifestNotInitialized;
         const ctx = self.ctx;
         if (concurrency < 1) return error.InvalidConcurrency;
@@ -238,6 +236,7 @@ pub const Payload = struct {
         defer plan.deinit();
 
         if (plan.jobs.len == 0) return;
+        try validateDryRunPrerequisites(plan.jobs, old_dir, bsdiff_enabled);
 
         var jobs = std.array_list.Managed(progress.Job).init(self.allocator);
         defer jobs.deinit();
@@ -356,4 +355,98 @@ fn printSizeKbMb(writer: *std.Io.Writer, size_bytes: u64) !void {
         return;
     }
     try writer.print("{d}.{d} KB", .{ whole, frac });
+}
+
+fn validateDryRunPrerequisites(
+    jobs: []const extract_plan.PartitionJob,
+    old_dir: ?[]const u8,
+    bsdiff_enabled: bool,
+) Error!void {
+    for (jobs) |job| {
+        for (job.operations) |op| {
+            switch (op.op_type) {
+                .source_copy => if (old_dir == null) return error.MissingOldImage,
+                .source_bsdiff => {
+                    if (!bsdiff_enabled) return error.UnhandledOperationType;
+                    if (old_dir == null) return error.MissingOldImage;
+                },
+                else => {},
+            }
+        }
+    }
+}
+
+test "validateDryRunPrerequisites allows non-delta operations" {
+    const extents = [_]extract_plan.Extent{.{ .start_block = 0, .num_blocks = 1, .offset_bytes = 0, .length_bytes = block_size }};
+    const ops = [_]extract_plan.Operation{.{
+        .op_type = .replace,
+        .blob_offset = 0,
+        .blob_length = 4,
+        .expected_uncompressed = block_size,
+        .extents = &extents,
+        .src_extents = &.{},
+        .src_length = 0,
+        .sha256 = null,
+        .src_sha256 = null,
+    }};
+    const jobs = [_]extract_plan.PartitionJob{.{
+        .pidx = 0,
+        .name = "boot",
+        .operations = &ops,
+        .total_output_bytes = block_size,
+        .total_operations = ops.len,
+    }};
+
+    try validateDryRunPrerequisites(&jobs, null, false);
+}
+
+test "validateDryRunPrerequisites requires old images for source copy" {
+    const extents = [_]extract_plan.Extent{.{ .start_block = 0, .num_blocks = 1, .offset_bytes = 0, .length_bytes = block_size }};
+    const ops = [_]extract_plan.Operation{.{
+        .op_type = .source_copy,
+        .blob_offset = 0,
+        .blob_length = 0,
+        .expected_uncompressed = block_size,
+        .extents = &extents,
+        .src_extents = &extents,
+        .src_length = block_size,
+        .sha256 = null,
+        .src_sha256 = null,
+    }};
+    const jobs = [_]extract_plan.PartitionJob{.{
+        .pidx = 0,
+        .name = "boot",
+        .operations = &ops,
+        .total_output_bytes = block_size,
+        .total_operations = ops.len,
+    }};
+
+    try std.testing.expectError(error.MissingOldImage, validateDryRunPrerequisites(&jobs, null, false));
+    try validateDryRunPrerequisites(&jobs, "/tmp/old", false);
+}
+
+test "validateDryRunPrerequisites requires bsdiff support before old images" {
+    const extents = [_]extract_plan.Extent{.{ .start_block = 0, .num_blocks = 1, .offset_bytes = 0, .length_bytes = block_size }};
+    const ops = [_]extract_plan.Operation{.{
+        .op_type = .source_bsdiff,
+        .blob_offset = 0,
+        .blob_length = 4,
+        .expected_uncompressed = block_size,
+        .extents = &extents,
+        .src_extents = &extents,
+        .src_length = block_size,
+        .sha256 = null,
+        .src_sha256 = null,
+    }};
+    const jobs = [_]extract_plan.PartitionJob{.{
+        .pidx = 0,
+        .name = "system",
+        .operations = &ops,
+        .total_output_bytes = block_size,
+        .total_operations = ops.len,
+    }};
+
+    try std.testing.expectError(error.UnhandledOperationType, validateDryRunPrerequisites(&jobs, null, false));
+    try std.testing.expectError(error.MissingOldImage, validateDryRunPrerequisites(&jobs, null, true));
+    try validateDryRunPrerequisites(&jobs, "/tmp/old", true);
 }
