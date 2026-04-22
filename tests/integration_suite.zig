@@ -3,7 +3,6 @@ const app = @import("zpayload");
 const build_options = @import("build_options");
 
 const selected_triplet = &app.fixtures.selected_triplet;
-const platform = app.utils.platform;
 
 fn testOutputPath(allocator: std.mem.Allocator, tmp_sub_path: []const u8, suffix: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/tmp/{s}/{s}", .{ build_options.local_cache_dir, tmp_sub_path, suffix });
@@ -197,8 +196,7 @@ test "zip input extraction path matches sample baseline" {
     const zip_path = app.fixtures.sample_ota_zip_path;
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
-    const tmp_base = platform.defaultTestTempBase();
-    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, tmp_base, zip_path);
+    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, zip_path);
     defer {
         app.input.payload_zip.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
             std.debug.panic("failed to cleanup temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });
@@ -242,35 +240,13 @@ test "zip temp extraction cleanup removes extracted temp dir" {
     const zip_path = app.fixtures.sample_ota_zip_path;
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
-    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, platform.defaultTestTempBase(), zip_path);
+    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, zip_path);
     defer allocator.free(extracted.temp_dir);
     defer allocator.free(extracted.payload_path);
 
     try std.testing.expect(app.fs_hash.fileExists(io, extracted.payload_path));
     try app.input.payload_zip.cleanupExtractedPayloadTempDir(io, extracted.temp_dir);
     try std.testing.expect(!app.fs_hash.fileExists(io, extracted.payload_path));
-}
-
-test "zip extraction falls back to workspace tmp when preferred temp base is unavailable" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-
-    const zip_path = app.fixtures.sample_ota_zip_path;
-    if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
-
-    const unavailable_tmp_base = "/definitely-missing-zpayload-temp-base";
-    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, unavailable_tmp_base, zip_path);
-    defer {
-        app.input.payload_zip.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
-            std.debug.panic("failed to cleanup fallback temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });
-        };
-        allocator.free(extracted.temp_dir);
-        allocator.free(extracted.payload_path);
-    }
-
-    try std.testing.expect(extracted.used_fallback_tmp);
-    try std.testing.expect(std.mem.startsWith(u8, extracted.temp_dir, ".tmp/"));
-    try std.testing.expect(app.fs_hash.fileExists(io, extracted.payload_path));
 }
 
 test "tar input extraction path matches sample baseline" {
@@ -285,7 +261,7 @@ test "tar input extraction path matches sample baseline" {
     const tar_path = try createTarFixture(allocator, io, tmp.sub_path[0..], app.fixtures.sample_payload_path);
     defer allocator.free(tar_path);
 
-    const extracted = try app.input.payload_tar.extractPayloadBinFromTar(allocator, io, platform.defaultTestTempBase(), tar_path);
+    const extracted = try app.input.payload_tar.extractPayloadBinFromTar(allocator, io, tar_path);
     defer {
         app.input.payload_tar.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
             std.debug.panic("failed to cleanup tar temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });
@@ -317,33 +293,6 @@ test "tar input extraction path matches sample baseline" {
     try app.fs_hash.assertFileHashEqual(allocator, io, app.fixtures.sample_boot_img, boot_out);
     try app.fs_hash.assertFileHashEqual(allocator, io, app.fixtures.sample_vbmeta_img, vbmeta_out);
     try app.fs_hash.assertFileHashEqual(allocator, io, app.fixtures.sample_vendor_boot_img, vendor_boot_out);
-}
-
-test "tar extraction falls back to workspace tmp when preferred temp base is unavailable" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-
-    if (!app.fs_hash.fileExists(io, app.fixtures.sample_payload_path)) return error.SkipZigTest;
-
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    const tar_path = try createTarFixture(allocator, io, tmp.sub_path[0..], app.fixtures.sample_payload_path);
-    defer allocator.free(tar_path);
-
-    const unavailable_tmp_base = "/definitely-missing-zpayload-temp-base";
-    const extracted = try app.input.payload_tar.extractPayloadBinFromTar(allocator, io, unavailable_tmp_base, tar_path);
-    defer {
-        app.input.payload_tar.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
-            std.debug.panic("failed to cleanup fallback tar temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });
-        };
-        allocator.free(extracted.temp_dir);
-        allocator.free(extracted.payload_path);
-    }
-
-    try std.testing.expect(extracted.used_fallback_tmp);
-    try std.testing.expect(std.mem.startsWith(u8, extracted.temp_dir, ".tmp/"));
-    try std.testing.expect(app.fs_hash.fileExists(io, extracted.payload_path));
 }
 
 test "bench512 modem partition extracts successfully" {

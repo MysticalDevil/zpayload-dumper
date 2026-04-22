@@ -15,7 +15,6 @@ fn isGzipped(tar_path: []const u8) bool {
 pub fn extractPayloadBinFromTar(
     allocator: std.mem.Allocator,
     io: std.Io,
-    tmp_base: []const u8,
     tar_path: []const u8,
 ) Error!TarExtractResult {
     var tar_file = std.Io.Dir.cwd().openFile(io, tar_path, .{}) catch return error.InvalidTarArchive;
@@ -27,16 +26,15 @@ pub fn extractPayloadBinFromTar(
     if (isGzipped(tar_path)) {
         var flate_buffer: [flate.max_window_len]u8 = undefined;
         var decompress: flate.Decompress = .init(&fr.interface, .gzip, &flate_buffer);
-        return try extractFromTarReader(allocator, io, tmp_base, &decompress.reader);
+        return try extractFromTarReader(allocator, io, &decompress.reader);
     } else {
-        return try extractFromTarReader(allocator, io, tmp_base, &fr.interface);
+        return try extractFromTarReader(allocator, io, &fr.interface);
     }
 }
 
 fn extractFromTarReader(
     allocator: std.mem.Allocator,
     io: std.Io,
-    tmp_base: []const u8,
     reader: *std.Io.Reader,
 ) Error!TarExtractResult {
     var file_name_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -50,7 +48,7 @@ fn extractFromTarReader(
         if (file.kind != .file) continue;
         if (!std.mem.eql(u8, file.name, "payload.bin")) continue;
 
-        const base = try common.selectTempBase(allocator, tmp_base, file.size);
+        const base = try common.selectTempBase(allocator);
         defer allocator.free(base.base_path);
         return try attemptExtractPayloadFile(allocator, io, &iter, file, base);
     }
@@ -143,7 +141,7 @@ fn attemptExtractPayloadFile(
 
     try extractTarFileIntoDir(io, iter, file, dir_path, temp_base.is_absolute);
 
-    return try common.makeExtractResult(allocator, dir_path, temp_base.used_fallback);
+    return try common.makeExtractResult(allocator, dir_path);
 }
 
 fn extractTarFileIntoDir(

@@ -1,7 +1,6 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
 const common = @import("archive_common.zig");
-const platform = @import("../utils/platform.zig");
 const flate = std.compress.flate;
 
 pub const Error = errors.AppError;
@@ -15,7 +14,7 @@ const FileExtents = struct {
 
 pub const cleanupExtractedPayloadTempDir = common.cleanupExtractedPayloadTempDir;
 
-pub fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_base: []const u8, zip_path: []const u8) Error!ZipExtractResult {
+pub fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, zip_path: []const u8) Error!ZipExtractResult {
     var zip_file = std.Io.Dir.cwd().openFile(io, zip_path, .{}) catch return error.InvalidZipArchive;
     defer zip_file.close(io);
 
@@ -29,26 +28,10 @@ pub fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_ba
         const name = filename_buf[0..entry.filename_len];
         fr.interface.readSliceAll(name) catch return error.ArchiveReadFailed;
         if (std.mem.eql(u8, name, "payload.bin")) {
-            const preferred_base = try common.selectTempBase(allocator, tmp_base, entry.uncompressed_size);
+            const preferred_base = try common.selectTempBase(allocator);
             defer allocator.free(preferred_base.base_path);
 
-            if (try attemptExtractPayloadEntry(allocator, io, &fr, entry, &filename_buf, preferred_base, true)) |result| {
-                return result;
-            }
-
-            if (preferred_base.used_fallback) return error.InsufficientDiskSpace;
-
-            const fallback_base = common.TempBaseSelection{
-                .base_path = try allocator.dupe(u8, platform.fallback_tmp_base),
-                .is_absolute = false,
-                .used_fallback = true,
-            };
-            defer allocator.free(fallback_base.base_path);
-
-            if (try attemptExtractPayloadEntry(allocator, io, &fr, entry, &filename_buf, fallback_base, true)) |result| {
-                return result;
-            }
-            return error.InsufficientDiskSpace;
+            return try attemptExtractPayloadEntry(allocator, io, &fr, entry, &filename_buf, preferred_base);
         }
     }
 
@@ -185,8 +168,7 @@ fn attemptExtractPayloadEntry(
     entry: std.zip.Iterator.Entry,
     filename_buf: []u8,
     temp_base: common.TempBaseSelection,
-    allow_space_retry: bool,
-) Error!?ZipExtractResult {
+) Error!ZipExtractResult {
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
     const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ temp_base.base_path, nonce });
@@ -198,15 +180,9 @@ fn attemptExtractPayloadEntry(
         std.log.warn("failed to cleanup temporary extraction directory '{s}': {}", .{ dir_path, cleanup_err });
     };
 
-    extractEntryIntoDir(io, fr, entry, filename_buf, dir_path, temp_base.is_absolute) catch |err| {
-        if (allow_space_retry and err == error.InsufficientDiskSpace) {
-            allocator.free(dir_path);
-            return null;
-        }
-        return err;
-    };
+    try extractEntryIntoDir(io, fr, entry, filename_buf, dir_path, temp_base.is_absolute);
 
-    return try common.makeExtractResult(allocator, dir_path, temp_base.used_fallback);
+    return try common.makeExtractResult(allocator, dir_path);
 }
 
 fn extractEntryIntoDir(

@@ -21,21 +21,16 @@ const StatVfs = extern struct {
 
 extern "c" fn statvfs(path: [*:0]const u8, buf: *StatVfs) c_int;
 
-pub fn resolveTempBase(env_map: *const std.process.Environ.Map) []const u8 {
-    if (env_map.get("TMPDIR")) |value| return value;
+pub fn defaultTestTempBase() []const u8 {
     return fallback_tmp_base;
 }
 
-pub fn defaultTestTempBase() []const u8 {
-    return "/tmp";
-}
-
 pub fn tempDirectorySuggestion() []const u8 {
-    return "set TMPDIR to a writable location or create ./.tmp";
+    return "create ./.tmp or ensure the current directory is writable";
 }
 
 pub fn tempEnvironmentDescription() []const u8 {
-    return "Temporary extraction base for zip/tar input (TMPDIR)";
+    return "Temporary extraction base for zip/tar input (current working directory)";
 }
 
 pub fn joinOwned(allocator: std.mem.Allocator, parts: []const []const u8) ![]u8 {
@@ -48,20 +43,4 @@ pub fn availableBytes(path: []const u8) Error!u64 {
     var buf: StatVfs = undefined;
     if (statvfs(path_z.ptr, &buf) != 0) return error.IoFailure;
     return buf.f_bavail * buf.f_frsize;
-}
-
-test "resolveTempBase prefers TMPDIR" {
-    var env_map = std.process.Environ.Map.init(std.testing.allocator);
-    defer env_map.deinit();
-
-    try env_map.put("TMPDIR", "custom-tmpdir");
-
-    try std.testing.expectEqualStrings("custom-tmpdir", resolveTempBase(&env_map));
-}
-
-test "resolveTempBase falls back to local temp directory" {
-    var env_map = std.process.Environ.Map.init(std.testing.allocator);
-    defer env_map.deinit();
-
-    try std.testing.expectEqualStrings(fallback_tmp_base, resolveTempBase(&env_map));
 }

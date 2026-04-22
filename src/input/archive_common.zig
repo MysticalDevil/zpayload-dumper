@@ -8,7 +8,6 @@ pub const Error = errors.AppError;
 pub const ExtractResult = struct {
     temp_dir: []u8,
     payload_path: []u8,
-    used_fallback_tmp: bool,
 };
 
 pub const PayloadMetadata = struct {
@@ -24,7 +23,6 @@ pub const PayloadMetadata = struct {
 pub const TempBaseSelection = struct {
     base_path: []u8,
     is_absolute: bool,
-    used_fallback: bool,
 };
 
 pub fn cleanupExtractedPayloadTempDir(io: std.Io, path: []const u8) Error!void {
@@ -74,23 +72,10 @@ pub fn metadataFromHeaderAndPrefix(
     };
 }
 
-pub fn selectTempBase(
-    allocator: std.mem.Allocator,
-    preferred_base: []const u8,
-    required_bytes: u64,
-) Error!TempBaseSelection {
-    const preferred_available = platform.availableBytes(preferred_base) catch 0;
-    if (preferred_available >= required_bytes) {
-        return .{
-            .base_path = try allocator.dupe(u8, preferred_base),
-            .is_absolute = std.fs.path.isAbsolute(preferred_base),
-            .used_fallback = false,
-        };
-    }
+pub fn selectTempBase(allocator: std.mem.Allocator) Error!TempBaseSelection {
     return .{
         .base_path = try allocator.dupe(u8, platform.fallback_tmp_base),
         .is_absolute = false,
-        .used_fallback = true,
     };
 }
 
@@ -116,23 +101,10 @@ pub fn createTempDir(io: std.Io, dir_path: []const u8, is_absolute: bool) Error!
 pub fn makeExtractResult(
     allocator: std.mem.Allocator,
     dir_path: []u8,
-    used_fallback_tmp: bool,
 ) !ExtractResult {
     const payload_path = try std.fmt.allocPrint(allocator, "{s}/payload.bin", .{dir_path});
     return .{
         .temp_dir = dir_path,
         .payload_path = payload_path,
-        .used_fallback_tmp = used_fallback_tmp,
     };
-}
-
-test "selectTempBase falls back when preferred space is insufficient" {
-    const allocator = std.testing.allocator;
-
-    const selection = try selectTempBase(allocator, platform.defaultTestTempBase(), std.math.maxInt(u64));
-    defer allocator.free(selection.base_path);
-
-    try std.testing.expect(selection.used_fallback);
-    try std.testing.expect(!selection.is_absolute);
-    try std.testing.expectEqualStrings(platform.fallback_tmp_base, selection.base_path);
 }
