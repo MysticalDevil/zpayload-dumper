@@ -1,6 +1,7 @@
 const std = @import("std");
 const cli_style = @import("style.zig");
 const Theme = cli_style.Theme;
+const platform = @import("../utils/platform.zig");
 
 const Layout = struct {
     const section_indent = 2;
@@ -81,7 +82,7 @@ pub fn renderFull(writer: *std.Io.Writer, use_color: bool) !void {
     try writeEnvLine(writer, theme, "NO_COLOR", "Disable ANSI colors unless a command-line color flag overrides it");
     try writeEnvLine(writer, theme, "CLICOLOR=0", "Disable ANSI colors unless a command-line color flag overrides it");
     try writeEnvLine(writer, theme, "CLICOLOR_FORCE=1", "Force ANSI colors even when output is not a TTY");
-    try writeEnvLine(writer, theme, "TMPDIR", "Temporary extraction base for zip input");
+    try writeEnvLine(writer, theme, "TMPDIR", platform.tempEnvironmentDescription());
     try Layout.writeBlankLine(writer);
 
     try theme.write(writer, .section, "Examples");

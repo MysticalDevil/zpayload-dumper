@@ -1,6 +1,7 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
 const header = @import("../payload/header.zig");
+const platform = @import("../utils/platform.zig");
 
 pub const Error = errors.AppError;
 
@@ -78,8 +79,7 @@ pub fn selectTempBase(
     preferred_base: []const u8,
     required_bytes: u64,
 ) Error!TempBaseSelection {
-    const fallback_base = ".tmp";
-    const preferred_available = getAvailableBytes(preferred_base) catch 0;
+    const preferred_available = platform.availableBytes(preferred_base) catch 0;
     if (preferred_available >= required_bytes) {
         return .{
             .base_path = try allocator.dupe(u8, preferred_base),
@@ -88,7 +88,7 @@ pub fn selectTempBase(
         };
     }
     return .{
-        .base_path = try allocator.dupe(u8, fallback_base),
+        .base_path = try allocator.dupe(u8, platform.fallback_tmp_base),
         .is_absolute = false,
         .used_fallback = true,
     };
@@ -126,38 +126,13 @@ pub fn makeExtractResult(
     };
 }
 
-const StatVfs = extern struct {
-    f_bsize: u64,
-    f_frsize: u64,
-    f_blocks: u64,
-    f_bfree: u64,
-    f_bavail: u64,
-    f_files: u64,
-    f_ffree: u64,
-    f_favail: u64,
-    f_fsid: u64,
-    f_flag: u64,
-    f_namemax: u64,
-    __f_spare: [6]c_int,
-};
-
-extern "c" fn statvfs(path: [*:0]const u8, buf: *StatVfs) c_int;
-
-fn getAvailableBytes(path: []const u8) !u64 {
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.NoSpaceLeft;
-    var buf: StatVfs = undefined;
-    if (statvfs(path_z.ptr, &buf) != 0) return error.InputOutput;
-    return buf.f_bavail * buf.f_frsize;
-}
-
 test "selectTempBase falls back when preferred space is insufficient" {
     const allocator = std.testing.allocator;
 
-    const selection = try selectTempBase(allocator, "/tmp", std.math.maxInt(u64));
+    const selection = try selectTempBase(allocator, platform.defaultTestTempBase(), std.math.maxInt(u64));
     defer allocator.free(selection.base_path);
 
     try std.testing.expect(selection.used_fallback);
     try std.testing.expect(!selection.is_absolute);
-    try std.testing.expectEqualStrings(".tmp", selection.base_path);
+    try std.testing.expectEqualStrings(platform.fallback_tmp_base, selection.base_path);
 }

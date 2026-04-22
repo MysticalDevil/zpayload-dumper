@@ -1,6 +1,7 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
 const common = @import("archive_common.zig");
+const platform = @import("../utils/platform.zig");
 const flate = std.compress.flate;
 
 pub const Error = errors.AppError;
@@ -38,7 +39,7 @@ pub fn extractPayloadBinFromZip(allocator: std.mem.Allocator, io: std.Io, tmp_ba
             if (preferred_base.used_fallback) return error.InsufficientDiskSpace;
 
             const fallback_base = common.TempBaseSelection{
-                .base_path = try allocator.dupe(u8, ".tmp"),
+                .base_path = try allocator.dupe(u8, platform.fallback_tmp_base),
                 .is_absolute = false,
                 .used_fallback = true,
             };

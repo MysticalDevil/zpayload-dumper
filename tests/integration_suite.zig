@@ -3,7 +3,7 @@ const app = @import("zpayload");
 const build_options = @import("build_options");
 
 const selected_triplet = &app.fixtures.selected_triplet;
-const default_tmp_base = "/tmp";
+const platform = app.utils.platform;
 
 fn testOutputPath(allocator: std.mem.Allocator, tmp_sub_path: []const u8, suffix: []const u8) ![]u8 {
     return std.fmt.allocPrint(allocator, "{s}/tmp/{s}/{s}", .{ build_options.local_cache_dir, tmp_sub_path, suffix });
@@ -197,7 +197,7 @@ test "zip input extraction path matches sample baseline" {
     const zip_path = app.fixtures.sample_ota_zip_path;
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
-    const tmp_base = default_tmp_base;
+    const tmp_base = platform.defaultTestTempBase();
     const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, tmp_base, zip_path);
     defer {
         app.input.payload_zip.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
@@ -242,7 +242,7 @@ test "zip temp extraction cleanup removes extracted temp dir" {
     const zip_path = app.fixtures.sample_ota_zip_path;
     if (!app.fs_hash.fileExists(io, zip_path)) return error.SkipZigTest;
 
-    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, default_tmp_base, zip_path);
+    const extracted = try app.input.payload_zip.extractPayloadBinFromZip(allocator, io, platform.defaultTestTempBase(), zip_path);
     defer allocator.free(extracted.temp_dir);
     defer allocator.free(extracted.payload_path);
 
@@ -285,7 +285,7 @@ test "tar input extraction path matches sample baseline" {
     const tar_path = try createTarFixture(allocator, io, tmp.sub_path[0..], app.fixtures.sample_payload_path);
     defer allocator.free(tar_path);
 
-    const extracted = try app.input.payload_tar.extractPayloadBinFromTar(allocator, io, default_tmp_base, tar_path);
+    const extracted = try app.input.payload_tar.extractPayloadBinFromTar(allocator, io, platform.defaultTestTempBase(), tar_path);
     defer {
         app.input.payload_tar.cleanupExtractedPayloadTempDir(io, extracted.temp_dir) catch |cleanup_err| {
             std.debug.panic("failed to cleanup tar temp dir '{s}': {}", .{ extracted.temp_dir, cleanup_err });

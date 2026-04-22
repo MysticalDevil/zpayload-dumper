@@ -11,7 +11,7 @@ const cli_ui = @import("ui.zig");
 const output = @import("output.zig");
 
 const Error = errors.AppError;
-const default_tmp_base = ".tmp";
+const platform = @import("../utils/platform.zig");
 const zip_suffix = ".zip";
 const tar_suffixes = [_][]const u8{ ".tar", ".tar.gz", ".tgz" };
 
@@ -93,7 +93,7 @@ pub fn run(
         }
     } else {
         var effective_payload: []const u8 = options.input;
-        const tmp_base = init.environ_map.get("TMPDIR") orelse default_tmp_base;
+        const tmp_base = platform.resolveTempBase(init.environ_map);
         if (is_zip_input) {
             ui.warn("zip input detected, extracting payload.bin first") catch return error.IoFailure;
             const extracted = try zip_payload.extractPayloadBinFromZip(gpa, io, tmp_base, options.input);

@@ -6,37 +6,9 @@ const progress = @import("progress.zig");
 const extent_writer = @import("extent_writer.zig");
 const extract_plan = @import("extract_plan.zig");
 const bsdiff = @import("bsdiff.zig");
+const platform = @import("../utils/platform.zig");
 
 pub const Error = errors.AppError;
-
-// ---------------------------------------------------------------------------
-// Disk space check via statvfs
-// ---------------------------------------------------------------------------
-
-const StatVfs = extern struct {
-    f_bsize: u64,
-    f_frsize: u64,
-    f_blocks: u64,
-    f_bfree: u64,
-    f_bavail: u64,
-    f_files: u64,
-    f_ffree: u64,
-    f_favail: u64,
-    f_fsid: u64,
-    f_flag: u64,
-    f_namemax: u64,
-    __f_spare: [6]c_int,
-};
-
-extern "c" fn statvfs(path: [*:0]const u8, buf: *StatVfs) c_int;
-
-fn getAvailableBytes(path: []const u8) Error!u64 {
-    var path_buf: [4096]u8 = undefined;
-    const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.IoFailure;
-    var buf: StatVfs = undefined;
-    if (statvfs(path_z.ptr, &buf) != 0) return error.IoFailure;
-    return buf.f_bavail * buf.f_frsize;
-}
 
 fn formatSize(buf: []u8, bytes: u64) []const u8 {
     const kb: u64 = 1024;
@@ -210,7 +182,7 @@ pub fn run(
         required_bytes = std.math.add(u64, required_bytes, job.total_output_bytes) catch return error.IntegerOverflow;
     }
 
-    const available_bytes = getAvailableBytes(output_dir) catch |err| {
+    const available_bytes = platform.availableBytes(output_dir) catch |err| {
         const msg = std.fmt.allocPrint(allocator, "failed to check disk space for output directory '{s}'", .{output_dir}) catch null;
         if (msg) |m| collector.addOwned(m);
         return err;
