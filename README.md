@@ -198,7 +198,7 @@ Progress:
 ## Test And Bench
 
 Python helper tooling lives under `scripts/` as a standard `uv`-managed project.
-Use `uv run --project scripts payload-gen ...` as the primary entrypoint for fixture generation and Python helper commands.
+Use `uv run --project scripts payload-gen ...` as the primary entrypoint for test sample generation and Python helper commands.
 Detailed generator documentation lives in [`docs/PYTHON_GENERATORS.md`](docs/PYTHON_GENERATORS.md).
 
 Tests:
@@ -225,7 +225,7 @@ End-to-end test (extract and compare hashes against expected output):
 zig build check_e2e
 ```
 
-Lightweight benchmark smoke (fixed partition subset):
+Quick health-check benchmark (fixed partition subset):
 
 ```bash
 zig build bench_smoke
@@ -270,7 +270,7 @@ All numbers below are actual runtime (mean of 5 runs, hyperfine).
 Gentoo Linux (kernel 7.0.0-gentoo-dist).
 
 The test payload is a **78 MB** synthetic sample
-(`uv run --project scripts payload-gen sample --total-mb 128`) that exercises
+(`uv run --project scripts payload-gen sample --total-mb 128`) that covers
 `REPLACE`, `REPLACE_XZ`, `REPLACE_BZ`, `ZSTD` and `ZERO` operations.
 
 | Scenario | Concurrency | zpayload-dumper | payload-dumper-go | Speed-up |
@@ -301,7 +301,7 @@ Observations:
 ## Synthetic Sample Generator
 
 Generate a synthetic `payload.bin`, a simulated OTA zip (`ota_update.zip`),
-and matching golden extracted images
+and matching expected output images
 for local/CI testing (output is under `tests/data/`, which is git-ignored):
 
 ```bash
@@ -313,7 +313,7 @@ uv run --project scripts payload-gen sample --name smoke1
 # larger sample for benchmarking (~80 MB payload with 128 MB raw data)
 uv run --project scripts payload-gen sample --name bench128 --total-mb 128
 
-# negative fixtures
+# error test cases
 uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
 uv run --project scripts payload-gen sample --name fixture-matrix --scenario all --total-mb 32
 ```
@@ -341,20 +341,20 @@ uv run --project scripts payload-gen delta \
   --output test_payload.bin
 ```
 
-Generate a complete fixture bundle for end-to-end testing:
+Generate a complete test sample bundle for full pipeline testing:
 
 ```bash
 uv run --project scripts payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output tests/data/generated/bsdiff-fixture/payload.bin \
-  --bundle-dir tests/data/generated/bsdiff-fixture
+  --output tests/data/generated/bsdiff-sample/payload.bin \
+  --bundle-dir tests/data/generated/bsdiff-sample
 ```
 
 The bundle includes `payload.bin`, `ota_update.zip`, `old/boot.img`,
 `extracted/boot.img`, and `manifest.textproto`. The generated manifest
-includes both `data_sha256_hash` and `src_sha256_hash`, so it exercises
+includes both `data_sha256_hash` and `src_sha256_hash`, so it validates
 the real `SOURCE_BSDIFF` checksum path.
 
 ## References

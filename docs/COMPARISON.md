@@ -292,7 +292,7 @@ zpayload-dumper/
 | **Disk-space check** | ❌ | ✅ (`statvfs`) |
 | **Intra-partition parallelism** | ❌ | ✅ |
 | **Extent merging** | ❌ | ✅ |
-| **E2E regression test** | ❌ | ✅ |
+| **End-to-end regression test** | ❌ | ✅ |
 | **Stress test** | ❌ | ✅ |
 | **Built-in benchmark** | ❌ | ✅ |
 | **Synthetic sample generator** | ❌ | ✅ (Python script) |

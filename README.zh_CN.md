@@ -156,7 +156,7 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 ## 开发
 
 Python 辅助工具位于 `scripts/`，现在是标准的 `uv` 管理工程。
-生成测试夹具或运行 Python 辅助命令时，统一使用 `uv run --project scripts payload-gen ...`。
+生成测试样本或运行 Python 辅助命令时，统一使用 `uv run --project scripts payload-gen ...`。
 详细说明见 [`docs/PYTHON_GENERATORS.zh.md`](docs/PYTHON_GENERATORS.zh.md)。
 
 ### 运行测试
@@ -175,7 +175,7 @@ zig build test_stress
 
 ### 端到端校验
 
-完整提取 payload，并用 SHA-256 与预期输出对比：
+完整提取 payload，并用 SHA-256 与预期输出镜像对比：
 
 ```bash
 zig build check_e2e
@@ -211,7 +211,7 @@ ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
 
 测试样本是一个 **78 MB** 的合成 payload
 （`uv run --project scripts payload-gen sample --total-mb 128`），
-包含 `REPLACE`、`REPLACE_XZ`、`REPLACE_BZ`、`ZSTD` 和 `ZERO` 五种操作类型。
+覆盖 `REPLACE`、`REPLACE_XZ`、`REPLACE_BZ`、`ZSTD` 和 `ZERO` 五种操作类型。
 
 | 场景 | 并发数 | zpayload-dumper | payload-dumper-go | 加速比 |
 |------|--------|-----------------|-------------------|--------|
@@ -236,7 +236,7 @@ ZHITAI TiPlus7100 1TB NVMe SSD，Gentoo Linux（内核 7.0.0-gentoo-dist）。
 
 ### 生成测试数据
 
-用于本地测试或持续集成，可以生成合成 payload 和对应的预期输出：
+用于本地测试或持续集成，可以生成合成 payload 和对应的预期输出镜像：
 
 ```bash
 uv sync --project scripts
@@ -247,7 +247,7 @@ uv run --project scripts payload-gen sample --name smoke1
 # 大型样本，用于性能测试（约 80 MB payload，128 MB 原始数据）
 uv run --project scripts payload-gen sample --name bench128 --total-mb 128
 
-# 负例夹具
+# 错误样本
 uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
 uv run --project scripts payload-gen sample --name fixture-matrix --scenario all --total-mb 32
 ```
@@ -275,20 +275,20 @@ uv run --project scripts payload-gen delta \
   --output test_payload.bin
 ```
 
-生成可直接做端到端测试的完整夹具目录：
+生成可直接做完整流程测试的完整测试样本目录：
 
 ```bash
 uv run --project scripts payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output tests/data/generated/bsdiff-fixture/payload.bin \
-  --bundle-dir tests/data/generated/bsdiff-fixture
+  --output tests/data/generated/bsdiff-sample/payload.bin \
+  --bundle-dir tests/data/generated/bsdiff-sample
 ```
 
-这个目录会同时包含 `payload.bin`、`ota_update.zip`、`old/boot.img`、
+生成的目录会同时包含 `payload.bin`、`ota_update.zip`、`old/boot.img`、
 `extracted/boot.img` 和 `manifest.textproto`。生成出的 manifest 会带上
-`data_sha256_hash` 和 `src_sha256_hash`，因此能覆盖真实的
+`data_sha256_hash` 和 `src_sha256_hash`，因此能验证真实的
 `SOURCE_BSDIFF` 校验路径。
 
 ## 支持的 Payload 特性

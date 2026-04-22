@@ -293,14 +293,14 @@ merge logic are interleaved, so the output file is populated continuously rather
    serialization.
 
 2. **Temp files are expensive.** The aggressive approach proved that parallel decompression is powerful, but the
-   temp-file I/O tax can completely cancel it out—especially for full-extraction workloads with many partitions.
+   temp-file I/O overhead can completely cancel it out—especially for full-extraction workloads with many partitions.
 
 3. **Streaming is the right abstraction.** By allowing workers to write directly to the output file (when in
-   order), we retained the parallelism benefit while eliminating the I/O tax. The 256 MB memory budget is a safety
+   order), we retained the parallelism benefit while eliminating the I/O overhead. The 256 MB memory budget is a safety
    valve, not the common path.
 
 4. **Disk-space checks matter.** The `statvfs` pre-check prevents users from starting a multi-gigabyte extraction
-   on a nearly-full disk, only to fail halfway through with a cryptic I/O error.
+   on a nearly-full disk, only to fail halfway through with a confusing I/O error.
 
 ---
 

@@ -1,7 +1,7 @@
 # Python Generators
 
 This repository ships a small `uv`-managed Python project under [`scripts/`](../scripts/).
-It is used to generate synthetic fixtures for local testing, CI, and regression work.
+It is used to generate synthetic test samples for local testing, CI, and regression testing.
 
 ## Setup
 
@@ -35,7 +35,7 @@ uv run --project scripts payload-gen delta --old old.img --new new.img --output 
 
 ### `payload-gen sample`
 
-Generates synthetic `payload.bin` fixtures, simulated OTA zips, and matching golden extracted images.
+Generates synthetic `payload.bin` test samples, simulated OTA zips, and matching expected output images.
 
 Typical usage:
 
@@ -50,9 +50,9 @@ Parameters:
 
 - `--out-root`: output root relative to the repository root. Default: `tests/data/generated`
 - `--name`: sample name. When `--scenario all` is used, the script expands this into `<name>-<scenario>`
-- `--seed`: fixed random seed for reproducible fixture generation
+- `--seed`: fixed random seed for reproducible test sample generation
 - `--total-mb`: target raw partition size budget used to size the synthetic partitions
-- `--scenario`: fixture type to generate. Default: `valid`
+- `--scenario`: sample type to generate. Default: `valid`
 - `--list-scenarios`: print supported scenarios and exit
 
 Supported scenarios:
@@ -81,9 +81,9 @@ tests/data/generated/<name>/
 
 Notes:
 
-- `expected_result.txt` is intended for Zig-side regression tests
+- `expected_result.txt` is intended for Zig codebase regression tests
 - `scenario.txt` records scenario name, description, seed, and any scenario-specific notes
-- the generator intentionally produces both success fixtures and negative fixtures
+- the generator intentionally produces both success samples and invalid test cases
 
 ### `payload-gen delta`
 
@@ -99,15 +99,15 @@ uv run --project scripts payload-gen delta \
   --output /tmp/test_delta.bin
 ```
 
-To generate a complete fixture bundle:
+To generate a complete test sample bundle:
 
 ```bash
 uv run --project scripts payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output tests/data/generated/bsdiff-fixture/payload.bin \
-  --bundle-dir tests/data/generated/bsdiff-fixture
+  --output tests/data/generated/bsdiff-sample/payload.bin \
+  --bundle-dir tests/data/generated/bsdiff-sample
 ```
 
 Parameters:
@@ -116,15 +116,15 @@ Parameters:
 - `--new`: expected extracted image after applying the patch
 - `--partition-name`: manifest partition name. Default: `test`
 - `--output`, `-o`: output `payload.bin` path
-- `--bundle-dir`: optional fixture bundle directory
+- `--bundle-dir`: optional test sample bundle directory
 - `--block-size`: block size used for alignment and manifest extents. Default: `4096`
 - `--proto-dir`: directory containing `update_metadata.proto`
-- `--check-with`: optional `zpayload-dumper` binary used for a quick `-l` sanity check
+- `--check-with`: optional `zpayload-dumper` binary used for a quick `-l` validation
 
 Output layout when `--bundle-dir` is used:
 
 ```text
-tests/data/generated/bsdiff-fixture/
+tests/data/generated/bsdiff-sample/
   payload.bin
   ota_update.zip
   manifest.textproto
@@ -143,11 +143,11 @@ Supported capability:
 - generated manifest includes:
   - `data_sha256_hash`
   - `src_sha256_hash`
-- optional bundle output for end-to-end extraction tests
+- optional bundle output for full extraction tests
 
 ## What The Generators Cover
 
-The Python project is intended to support these Zig-side test categories:
+The Python project is intended to support these Zig codebase test categories:
 
 - normal extraction of synthetic `payload.bin`
 - OTA zip input handling
@@ -157,7 +157,7 @@ The Python project is intended to support these Zig-side test categories:
 
 It does not currently try to model:
 
-- multi-partition delta payloads with mixed operation types in one fixture
+- multi-partition delta payloads with mixed operation types in one sample
 - payload signatures or signed metadata blocks
 - Android production OTA metadata beyond what the dumper currently needs
 
@@ -170,24 +170,24 @@ uv run --project scripts payload-gen sample --name smoke1
 zig build check_e2e -- tests/data/generated/smoke1/payload.bin tests/data/generated/smoke1/extracted
 ```
 
-Generate a negative fixture and verify the expected failure:
+Generate an invalid sample and verify the expected failure:
 
 ```bash
 uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
 zig build run -- tests/data/generated/bad-magic/payload.bin
 ```
 
-Generate and extract a real `SOURCE_BSDIFF` fixture:
+Generate and extract a real `SOURCE_BSDIFF` test sample:
 
 ```bash
 uv run --project scripts payload-gen delta \
   --old old_boot.img \
   --new new_boot.img \
   --partition-name boot \
-  --output /tmp/bsdiff-fixture/payload.bin \
-  --bundle-dir /tmp/bsdiff-fixture
+  --output /tmp/bsdiff-sample/payload.bin \
+  --bundle-dir /tmp/bsdiff-sample
 
-zig build run -Dbsdiff -- /tmp/bsdiff-fixture/payload.bin \
-  --old /tmp/bsdiff-fixture/old \
-  -o /tmp/bsdiff-fixture/out
+zig build run -Dbsdiff -- /tmp/bsdiff-sample/payload.bin \
+  --old /tmp/bsdiff-sample/old \
+  -o /tmp/bsdiff-sample/out
 ```
