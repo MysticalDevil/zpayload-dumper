@@ -6,5 +6,5 @@ from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 SCRIPTS_ROOT = PACKAGE_ROOT.parent.parent
-REPO_ROOT = SCRIPTS_ROOT.parent
+REPO_ROOT = SCRIPTS_ROOT
 PROTO_DIR = REPO_ROOT / "proto"
