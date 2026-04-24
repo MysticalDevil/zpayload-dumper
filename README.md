@@ -126,7 +126,7 @@ just release
 
 The artifact is placed in `release/` with `SHA256SUMS`.
 
-> **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch.
+> **Platform support:** The `main` branch targets POSIX-compatible systems (Linux, macOS, etc.). Windows native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch via a hybrid dependency model: POSIX links system libraries (`upb`, `utf8_range`, `bz2`), while Windows compiles vendored sources from source.
 >
 > **Async experiment:** The [`feat/async-engine`](../../tree/feat/async-engine) branch replaces the manual thread pool with `std.Io.Group.concurrent` and is ready for `std.Io.Uring` (io_uring) once upstream stabilizes the runtime. Zig 0.16.0's `std.Io.Uring` requires compile-fix [PR #31764](https://codeberg.org/ziglang/zig/pulls/31764) (`ReadOnlyFileSystem` missing from `Dir.OpenError` / `Dir.RealPathFileError`) and still segfaults at runtime in `CancelRegion.init` during fiber context switches, so the backend remains disabled on that branch.
 >

@@ -18,6 +18,7 @@
 - Progress tracking with TTY-aware rendering (dynamic multi-partition view vs line-based logs).
 - Environment variable color override (`ZPAYLOAD_COLOR`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`).
 - Centralized platform abstraction (`src/utils/platform.zig`) for OS-specific paths and APIs.
+- **Windows support** (on `feat/windows-support`) via hybrid dependency model: POSIX links system libraries (`upb`, `utf8_range`, `bz2`), while Windows compiles vendored sources. Includes `GetDiskFreeSpaceExA` disk-space check and cross-platform path handling.
 
 ### Changed
 

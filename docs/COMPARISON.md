@@ -465,7 +465,7 @@ zig build -Dtarget=aarch64-linux-gnu   # need ARM64 upb/utf8_range/bz2
 ```
 
 Go's pure-Go dependencies make cross-compilation straightforward. Zig's C dependencies (`upb`, `utf8_range`, `bz2`) require either
-cross-compiled versions of those libraries or building them from source for the target. Windows cross-compilation is not supported on main.
+cross-compiled versions of those libraries or building them from source for the target. Windows native builds are maintained on the `feat/windows-support` branch via vendored sources.
 
 ### 10.6 Concurrency Model Clarity
 
