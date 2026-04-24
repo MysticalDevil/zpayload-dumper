@@ -199,7 +199,7 @@ pub fn run(
     }
 
     // --- Phase 2: Prepare spill directory and memory budget ---
-    const spill_dir = try std.fmt.allocPrint(allocator, "{s}/.zpayload_spill", .{output_dir});
+    const spill_dir = try platform.joinOwned(allocator, &.{ output_dir, ".zpayload_spill" });
     defer allocator.free(spill_dir);
     std.Io.Dir.cwd().createDirPath(io, spill_dir) catch return error.IoFailure;
 
@@ -243,7 +243,9 @@ pub fn run(
     for (plan.jobs, 0..) |job, pidx| {
         total_tasks = std.math.add(usize, total_tasks, job.total_operations) catch return error.IntegerOverflow;
 
-        const output_path = try std.fmt.allocPrint(allocator, "{s}/{s}.img", .{ output_dir, job.name });
+        const output_name = try std.fmt.allocPrint(allocator, "{s}.img", .{job.name});
+        defer allocator.free(output_name);
+        const output_path = try platform.joinOwned(allocator, &.{ output_dir, output_name });
         {
             var out = std.Io.Dir.cwd().createFile(io, output_path, .{ .truncate = true }) catch return error.IoFailure;
             defer out.close(io);
@@ -617,7 +619,9 @@ fn materializeSourceBsdiff(
     if (!shared.bsdiff_enabled) return error.UnhandledOperationType;
     const old_dir = shared.old_dir orelse return error.MissingOldImage;
 
-    const path = std.fmt.allocPrint(shared.allocator, "{s}/{s}.img", .{ old_dir, partition_name }) catch return error.OutOfMemory;
+    const file_name = std.fmt.allocPrint(shared.allocator, "{s}.img", .{partition_name}) catch return error.OutOfMemory;
+    defer shared.allocator.free(file_name);
+    const path = platform.joinOwned(shared.allocator, &.{ old_dir, file_name }) catch return error.OutOfMemory;
     defer shared.allocator.free(path);
 
     var old_file = std.Io.Dir.cwd().openFile(shared.io, path, .{ .mode = .read_only }) catch return error.IoFailure;
@@ -677,7 +681,9 @@ fn materializeSourceCopy(
 ) Error!usize {
     const old_dir = shared.old_dir orelse return error.MissingOldImage;
 
-    const path = std.fmt.allocPrint(shared.allocator, "{s}/{s}.img", .{ old_dir, partition_name }) catch return error.OutOfMemory;
+    const file_name = std.fmt.allocPrint(shared.allocator, "{s}.img", .{partition_name}) catch return error.OutOfMemory;
+    defer shared.allocator.free(file_name);
+    const path = platform.joinOwned(shared.allocator, &.{ old_dir, file_name }) catch return error.OutOfMemory;
     defer shared.allocator.free(path);
 
     var file = std.Io.Dir.cwd().openFile(shared.io, path, .{ .mode = .read_only }) catch return error.IoFailure;

@@ -2,6 +2,7 @@ const std = @import("std");
 const errors = @import("../errors.zig");
 const common = @import("archive_common.zig");
 const flate = std.compress.flate;
+const platform = @import("../utils/platform.zig");
 
 pub const Error = errors.AppError;
 pub const ZipExtractResult = common.ExtractResult;
@@ -171,7 +172,9 @@ fn attemptExtractPayloadEntry(
 ) Error!ZipExtractResult {
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
-    const dir_path = try std.fmt.allocPrint(allocator, "{s}/zpayload_{d}", .{ temp_base.base_path, nonce });
+    const dir_name = try std.fmt.allocPrint(allocator, "zpayload_{d}", .{nonce});
+    defer allocator.free(dir_name);
+    const dir_path = try platform.joinOwned(allocator, &.{ temp_base.base_path, dir_name });
     errdefer allocator.free(dir_path);
 
     try common.createTempBaseIfNeeded(io, temp_base.base_path, temp_base.is_absolute);

@@ -3,6 +3,7 @@ const errors = @import("errors.zig");
 const app = @import("root.zig");
 const cli = app.cli;
 const payload = app.payload;
+const platform = app.platform;
 
 const Error = errors.AppError;
 
@@ -19,7 +20,7 @@ fn suggestionForError(err: Error) ?[]const u8 {
         error.UnsupportedPayloadVersion => "ensure the payload uses version 2",
         error.InvalidPartitionName => "ensure the payload manifest does not contain unsafe partition names",
         error.InsufficientDiskSpace => "specify a different output directory with -o or free up disk space",
-        error.TempDirectoryUnavailable => "set TMPDIR to a writable location or create ./.tmp",
+        error.TempDirectoryUnavailable => platform.tempDirectorySuggestion(),
         error.TempDirectoryCreateFailed => "verify the temporary directory path is writable",
         error.TempDirectoryCleanupFailed => "remove the temporary extraction directory manually and retry",
         error.ArchiveReadFailed => "verify the archive file is readable and not truncated",

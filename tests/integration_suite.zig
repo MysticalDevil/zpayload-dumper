@@ -5,7 +5,7 @@ const build_options = @import("build_options");
 const selected_triplet = &app.fixtures.selected_triplet;
 
 fn testOutputPath(allocator: std.mem.Allocator, tmp_sub_path: []const u8, suffix: []const u8) ![]u8 {
-    return std.fmt.allocPrint(allocator, "{s}/tmp/{s}/{s}", .{ build_options.local_cache_dir, tmp_sub_path, suffix });
+    return app.platform.joinOwned(allocator, &.{ build_options.local_cache_dir, "tmp", tmp_sub_path, suffix });
 }
 
 fn createTarFixture(

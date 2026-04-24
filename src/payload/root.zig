@@ -5,6 +5,7 @@ const header = @import("header.zig");
 const progress = @import("progress.zig");
 const extract_plan = @import("extract_plan.zig");
 const engine = @import("engine.zig");
+const platform = @import("../utils/platform.zig");
 
 pub const block_size: u64 = 4096;
 pub const Error = errors.AppError;
@@ -423,7 +424,7 @@ test "validateDryRunPrerequisites requires old images for source copy" {
     }};
 
     try std.testing.expectError(error.MissingOldImage, validateDryRunPrerequisites(&jobs, null, false));
-    try validateDryRunPrerequisites(&jobs, "/tmp/old", false);
+    try validateDryRunPrerequisites(&jobs, platform.defaultTestTempBase(), false);
 }
 
 test "validateDryRunPrerequisites requires bsdiff support before old images" {
@@ -449,5 +450,5 @@ test "validateDryRunPrerequisites requires bsdiff support before old images" {
 
     try std.testing.expectError(error.UnhandledOperationType, validateDryRunPrerequisites(&jobs, null, false));
     try std.testing.expectError(error.MissingOldImage, validateDryRunPrerequisites(&jobs, null, true));
-    try validateDryRunPrerequisites(&jobs, "/tmp/old", true);
+    try validateDryRunPrerequisites(&jobs, platform.defaultTestTempBase(), true);
 }

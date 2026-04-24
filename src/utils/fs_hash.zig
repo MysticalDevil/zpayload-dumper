@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("platform.zig");
 
 pub fn hashFileAtPath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![32]u8 {
     var file = try std.Io.Dir.cwd().openFile(io, path, .{});
@@ -59,9 +60,9 @@ pub fn compareDirs(allocator: std.mem.Allocator, io: std.Io, baseline_dir: []con
         if (entry.kind != .file) continue;
         baseline_count += 1;
 
-        const expected_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ baseline_dir, entry.path });
+        const expected_path = try platform.joinOwned(allocator, &.{ baseline_dir, entry.path });
         defer allocator.free(expected_path);
-        const actual_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ output_dir, entry.path });
+        const actual_path = try platform.joinOwned(allocator, &.{ output_dir, entry.path });
         defer allocator.free(actual_path);
 
         const expected_stat = try std.Io.Dir.cwd().statFile(io, expected_path, .{});

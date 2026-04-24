@@ -1,5 +1,6 @@
 const std = @import("std");
 const cli_style = @import("style.zig");
+const platform = @import("../utils/platform.zig");
 const Theme = cli_style.Theme;
 
 const Layout = struct {

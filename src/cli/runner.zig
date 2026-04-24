@@ -9,6 +9,7 @@ const render = @import("render.zig");
 const types = @import("types.zig");
 const cli_ui = @import("ui.zig");
 const output = @import("output.zig");
+const platform = @import("../utils/platform.zig");
 
 const Error = errors.AppError;
 const zip_suffix = ".zip";

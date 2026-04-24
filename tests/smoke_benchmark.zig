@@ -8,7 +8,9 @@ const bench_partitions = &app.fixtures.selected_triplet;
 fn defaultOutputDir(gpa: std.mem.Allocator, io: std.Io) ![]u8 {
     var nonce: u64 = undefined;
     io.random(std.mem.asBytes(&nonce));
-    return std.fmt.allocPrint(gpa, "{s}/bench_smoke_{d}", .{ build_options.local_cache_dir, nonce });
+    const dir_name = try std.fmt.allocPrint(gpa, "bench_smoke_{d}", .{nonce});
+    defer gpa.free(dir_name);
+    return app.platform.joinOwned(gpa, &.{ build_options.local_cache_dir, dir_name });
 }
 
 fn mibPerSec(bytes: u64, elapsed_ns: i128) u64 {
@@ -28,7 +30,9 @@ fn kibPerSec(bytes: u64, elapsed_ns: i128) u64 {
 fn extractedBytes(io: std.Io, out_dir: []const u8, names: []const []const u8) !u64 {
     var total: u64 = 0;
     for (names) |name| {
-        const path = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/{s}.img", .{ out_dir, name });
+        const file_name = try std.fmt.allocPrint(std.heap.page_allocator, "{s}.img", .{name});
+        defer std.heap.page_allocator.free(file_name);
+        const path = try app.platform.joinOwned(std.heap.page_allocator, &.{ out_dir, file_name });
         defer std.heap.page_allocator.free(path);
         const st = try std.Io.Dir.cwd().statFile(io, path, .{});
         total += st.size;

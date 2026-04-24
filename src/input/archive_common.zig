@@ -102,7 +102,7 @@ pub fn makeExtractResult(
     allocator: std.mem.Allocator,
     dir_path: []u8,
 ) !ExtractResult {
-    const payload_path = try std.fmt.allocPrint(allocator, "{s}/payload.bin", .{dir_path});
+    const payload_path = try platform.joinOwned(allocator, &.{ dir_path, "payload.bin" });
     return .{
         .temp_dir = dir_path,
         .payload_path = payload_path,
