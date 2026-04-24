@@ -1,4 +1,5 @@
 const std = @import("std");
+const deps = @import("build_deps.zig");
 
 const BuildOptions = struct {
     target: std.Build.ResolvedTarget,
@@ -54,7 +55,52 @@ fn createTestRun(
     return b.addRunArtifact(tests);
 }
 
-fn attachPayloadDeps(
+fn isWindowsTarget(target: std.Build.ResolvedTarget) bool {
+    return target.result.os.tag == .windows;
+}
+
+fn addSourceFiles(
+    b: *std.Build,
+    module: *std.Build.Module,
+    base_dir: []const u8,
+    sources: []const []const u8,
+) void {
+    for (sources) |source| {
+        module.addCSourceFile(.{
+            .file = b.path(b.pathJoin(&.{ base_dir, source })),
+        });
+    }
+}
+
+fn attachVendoredPayloadDeps(
+    b: *std.Build,
+    module: *std.Build.Module,
+    upb_out: std.Build.LazyPath,
+    minitable_out: std.Build.LazyPath,
+) void {
+    module.addIncludePath(upb_out);
+    module.addIncludePath(minitable_out);
+    module.addIncludePath(b.path("src/c"));
+    module.addIncludePath(b.path("third_party/protobuf"));
+    module.addIncludePath(b.path("third_party/protobuf/upb/reflection/cmake"));
+    module.addIncludePath(b.path("third_party/protobuf/third_party/utf8_range"));
+    module.addIncludePath(b.path("third_party/bzip2"));
+    module.addCSourceFile(.{
+        .file = upb_out.path(b, "update_metadata.upb.c"),
+    });
+    module.addCSourceFile(.{
+        .file = minitable_out.path(b, "update_metadata.upb_minitable.c"),
+    });
+    module.addCSourceFile(.{
+        .file = b.path("src/c/upb_wrap.c"),
+    });
+    addSourceFiles(b, module, "third_party/protobuf", &deps.upb_sources);
+    addSourceFiles(b, module, "third_party/protobuf", &deps.upb_bootstrap_sources);
+    addSourceFiles(b, module, "third_party/protobuf", &deps.utf8_range_sources);
+    addSourceFiles(b, module, "third_party/bzip2", &deps.bzip2_sources);
+}
+
+fn attachSystemPayloadDeps(
     b: *std.Build,
     module: *std.Build.Module,
     upb_out: std.Build.LazyPath,
@@ -76,6 +122,20 @@ fn attachPayloadDeps(
     module.linkSystemLibrary("upb", .{});
     module.linkSystemLibrary("utf8_range", .{});
     module.linkSystemLibrary("bz2", .{});
+}
+
+fn attachPayloadDeps(
+    b: *std.Build,
+    module: *std.Build.Module,
+    target: std.Build.ResolvedTarget,
+    upb_out: std.Build.LazyPath,
+    minitable_out: std.Build.LazyPath,
+) void {
+    if (isWindowsTarget(target)) {
+        attachVendoredPayloadDeps(b, module, upb_out, minitable_out);
+    } else {
+        attachSystemPayloadDeps(b, module, upb_out, minitable_out);
+    }
 }
 
 fn attachIntegrationImport(module: *std.Build.Module, zpayload_mod: *std.Build.Module) void {
@@ -104,11 +164,21 @@ pub fn build(b: *std.Build) void {
     build_options.addOption([]const u8, "local_cache_dir", local_cache_dir);
     build_options.addOption(bool, "bsdiff_enabled", bsdiff_enabled);
 
-    const protoc = b.addSystemCommand(&.{"protoc"});
-    const upb_out = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
-    const minitable_out = protoc.addPrefixedOutputDirectoryArg("--upb_minitable_out=", "proto_minitable");
-    protoc.addArg("--proto_path=proto");
-    protoc.addArg("update_metadata.proto");
+    const upb_out: std.Build.LazyPath, const minitable_out: std.Build.LazyPath = blk: {
+        if (isWindowsTarget(options.target)) {
+            break :blk .{
+                b.path("src/c"),
+                b.path("src/c"),
+            };
+        } else {
+            const protoc = b.addSystemCommand(&.{"protoc"});
+            const uo = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
+            const mo = protoc.addPrefixedOutputDirectoryArg("--upb_minitable_out=", "proto_minitable");
+            protoc.addArg("--proto_path=proto");
+            protoc.addArg("update_metadata.proto");
+            break :blk .{ uo, mo };
+        }
+    };
 
     const translate_upb = b.addTranslateC(.{
         .root_source_file = b.path("src/c/upb_wrap.h"),
@@ -120,13 +190,16 @@ pub fn build(b: *std.Build) void {
         .target = options.target,
         .optimize = options.optimize,
     });
+    if (isWindowsTarget(options.target)) {
+        translate_compress.addIncludePath(b.path("third_party/bzip2"));
+    }
 
     const root_module = createRootModule(b, options, "src/main.zig");
     root_module.addOptions("build_options", build_options);
-    attachPayloadDeps(b, root_module, upb_out, minitable_out);
+    attachPayloadDeps(b, root_module, options.target, upb_out, minitable_out);
 
     const zpayload_mod = createRootModule(b, options, "src/root.zig");
-    attachPayloadDeps(b, zpayload_mod, upb_out, minitable_out);
+    attachPayloadDeps(b, zpayload_mod, options.target, upb_out, minitable_out);
 
     root_module.addImport("upb", translate_upb.createModule());
     root_module.addImport("compress", translate_compress.createModule());
