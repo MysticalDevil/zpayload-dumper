@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const errors = @import("../errors.zig");
 
@@ -21,6 +22,13 @@ const StatVfs = extern struct {
 
 extern "c" fn statvfs(path: [*:0]const u8, buf: *StatVfs) c_int;
 
+extern "kernel32" fn GetDiskFreeSpaceExA(
+    lpDirectoryName: [*:0]const u8,
+    lpFreeBytesAvailableToCaller: ?*u64,
+    lpTotalNumberOfBytes: ?*u64,
+    lpTotalNumberOfFreeBytes: ?*u64,
+) callconv(.winapi) std.os.windows.BOOL;
+
 pub fn defaultTestTempBase() []const u8 {
     return fallback_tmp_base;
 }
@@ -38,9 +46,24 @@ pub fn joinOwned(allocator: std.mem.Allocator, parts: []const []const u8) ![]u8 
 }
 
 pub fn availableBytes(path: []const u8) Error!u64 {
+    return switch (builtin.os.tag) {
+        .windows => availableBytesWindows(path),
+        else => availableBytesPosix(path),
+    };
+}
+
+fn availableBytesPosix(path: []const u8) Error!u64 {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.IoFailure;
     var buf: StatVfs = undefined;
     if (statvfs(path_z.ptr, &buf) != 0) return error.IoFailure;
     return buf.f_bavail * buf.f_frsize;
+}
+
+fn availableBytesWindows(path: []const u8) Error!u64 {
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.IoFailure;
+    var free_bytes: u64 = 0;
+    if (!GetDiskFreeSpaceExA(path_z.ptr, &free_bytes, null, null).toBool()) return error.IoFailure;
+    return free_bytes;
 }
