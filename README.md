@@ -128,7 +128,7 @@ The artifact is placed in `release/` with `SHA256SUMS`.
 
 > **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch.
 >
-> **Async experiment:** The [`feat/async-engine`](../../tree/feat/async-engine) branch replaces the manual thread pool with `std.Io.Group.concurrent`. It is ready for `std.Io.Uring` (io_uring) once upstream stabilizes the runtime. Currently `Uring` compiles with PR #31764 but segfaults at runtime in `CancelRegion.init`, so the backend remains disabled.
+> **Async experiment:** The [`feat/async-engine`](../../tree/feat/async-engine) branch replaces the manual thread pool with `std.Io.Group.concurrent` (running on the default thread-based `std.Io` runtime). An experimental `std.Io.Uring` (io_uring) backend exists but is entirely disabled — it compiles with PR #31764 but segfaults at runtime in `CancelRegion.init` during fiber context switches.
 
 ## Usage
 
