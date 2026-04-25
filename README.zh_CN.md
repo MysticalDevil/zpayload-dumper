@@ -87,11 +87,9 @@ zig build -Dbsdiff
 
 编译完成后，可通过 `zig build run -- ...` 直接运行，或从安装前缀的 `bin/zpayload-dumper` 调用。
 
-> **平台支持：** `main` 分支针对 POSIX 兼容系统（Linux、macOS 等）。Windows 原生构建在 [`feat/windows-support`](../../tree/feat/windows-support) 分支维护，采用混合依赖模型：POSIX 链接系统库（`upb`、`utf8_range`、`bz2`），Windows 则从源码直接编译自带的 vendor 版本。
+> **平台支持：** `main` 分支仅针对 Linux。Windows 交叉编译和原生构建在 [`feat/windows-support`](../../tree/feat/windows-support) 分支维护，采用混合依赖模型：POSIX 目标链接系统库（`upb`、`utf8_range`、`bz2`），Windows 则从源码编译自带的 vendor 版本。
 >
-> **异步实验：** [`feat/async-engine`](../../tree/feat/async-engine) 分支将手动线程池替换为 `std.Io.Group.concurrent`，并可在上游稳定运行后接入 `std.Io.Uring`（io_uring）。Zig 0.16.0 的 `std.Io.Uring` 需要编译修复 [PR #31764](https://codeberg.org/ziglang/zig/pulls/31764)（`Dir.OpenError` / `Dir.RealPathFileError` 缺少 `ReadOnlyFileSystem`），但即使修复后运行时仍会在 `CancelRegion.init` 的 fiber 上下文切换中崩溃，因此该后端在该分支上保持禁用。
->
-> **libxev 实验：** [`feat/libxev-engine`](../../tree/feat/libxev-engine) 分支将手动线程池替换为 [mitchellh/libxev](https://github.com/mitchellh/libxev) 的 `ThreadPool`。该分支编译通过且所有测试通过，但在此 CPU 密集型负载上没有表现出相对手动线程的性能提升（在测量误差范围内）。依赖通过 `build.zig.zon` 集成。
+> **异步实验：** [`feat/async-engine`](../../tree/feat/async-engine) 分支将手动线程池替换为 `std.Io.Group.concurrent`（运行在默认的基于线程的 `std.Io` 运行时上）。该分支包含一个实验性的 `std.Io.Uring`（io_uring）后端，但已被完全禁用——虽然配合 PR #31764 可以编译通过，但运行时会在 `CancelRegion.init` 的 fiber 上下文切换中崩溃。
 
 ## 用法
 
