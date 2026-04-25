@@ -6,8 +6,10 @@ import argparse
 import hashlib
 import subprocess
 from pathlib import Path
+from typing import Protocol, cast
 
 import bsdiff4
+from google.protobuf.message import Message
 from google.protobuf import text_format
 
 from payload_gen.format import (
@@ -23,8 +25,70 @@ from payload_gen.utils import pad_block_aligned
 from payload_gen.writer import write_bundle
 
 
+class _ExtentMessage(Protocol):
+    start_block: int
+    num_blocks: int
+
+
+class _ExtentList(Protocol):
+    def add(self) -> _ExtentMessage: ...
+
+
+class _OperationMessage(Protocol):
+    type: int
+    data_offset: int
+    data_length: int
+    src_length: int
+    dst_length: int
+    data_sha256_hash: bytes
+    src_sha256_hash: bytes
+    src_extents: _ExtentList
+    dst_extents: _ExtentList
+
+
+class _OperationList(Protocol):
+    def add(self) -> _OperationMessage: ...
+
+
+class _PartitionInfo(Protocol):
+    size: int
+
+
+class _PartitionMessage(Protocol):
+    partition_name: str
+    old_partition_info: _PartitionInfo
+    new_partition_info: _PartitionInfo
+    operations: _OperationList
+
+
+class _PartitionList(Protocol):
+    def add(self) -> _PartitionMessage: ...
+
+
+class _DeltaArchiveManifest(Protocol):
+    block_size: int
+    minor_version: int
+    partitions: _PartitionList
+
+    def SerializeToString(self) -> bytes: ...
+
+
+class _InstallOperationType(Protocol):
+    SOURCE_BSDIFF: int
+
+
+class _InstallOperation(Protocol):
+    Type: _InstallOperationType
+
+
+class _UpdateMetadataPb2(Protocol):
+    InstallOperation: _InstallOperation
+
+    def DeltaArchiveManifest(self) -> _DeltaArchiveManifest: ...
+
+
 def build_manifest(
-    pb2: object,
+    pb2: _UpdateMetadataPb2,
     *,
     partition_name: str,
     block_size: int,
@@ -34,7 +98,7 @@ def build_manifest(
     patch_length: int,
     patch_sha256: bytes,
     src_sha256: bytes,
-) -> object:
+) -> _DeltaArchiveManifest:
     manifest = pb2.DeltaArchiveManifest()
     manifest.block_size = block_size
     manifest.minor_version = 4
@@ -110,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     patch_sha256 = hashlib.sha256(patch).digest()
     src_sha256 = hashlib.sha256(old_data).digest()
 
-    pb2 = load_update_metadata_pb2(args.proto_dir)
+    pb2 = cast(_UpdateMetadataPb2, load_update_metadata_pb2(args.proto_dir))
     manifest = build_manifest(
         pb2,
         partition_name=args.partition_name,
@@ -123,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         src_sha256=src_sha256,
     )
     manifest_bytes = manifest.SerializeToString()
-    manifest_text = text_format.MessageToString(manifest)
+    manifest_text = text_format.MessageToString(cast(Message, manifest))
     print(f"[INFO] manifest size: {len(manifest_bytes)} bytes")
 
     payload_bytes = build_payload_bytes(manifest_bytes, patch)

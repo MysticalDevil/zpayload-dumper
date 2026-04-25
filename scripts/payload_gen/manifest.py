@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from types import ModuleType
 
-from payload_gen.models import Extent, PartitionSpec
+from payload_gen.models import PartitionSpec
 from payload_gen.paths import PROTO_DIR
 
 
