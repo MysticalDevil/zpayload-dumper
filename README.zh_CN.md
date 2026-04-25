@@ -27,6 +27,19 @@ Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数
   - XZ 和 Zstd 使用 Zig 原生 `std.compress`（无需系统库）
   - 仅 bzip2 仍需 `libbz2.so`
 
+### 发行版支持
+
+| 发行版 | 包管理器 | 状态 | 说明 |
+|--------|---------|------|------|
+| Arch Linux | `pacman` | ✅ 支持 | `protobuf` ≥ 34 自带 `protoc-gen-upb` |
+| Gentoo | `emerge` | ✅ 支持 | `dev-libs/protobuf[upb]` |
+| Ubuntu | `apt` | ⚠️ 需从源码编译 | apt 的 `protobuf-compiler`（3.21）缺少 upb 插件 |
+| Debian | `apt` | ⚠️ 需从源码编译 | 与 Ubuntu 相同 |
+| Fedora | `dnf` | ⚠️ 需从源码编译 | dnf 的 `protobuf-compiler` 缺少 upb 插件 |
+| Alpine | `apk` | ⚠️ 已知问题 | `protoc-gen-upb` 存在，但 Zig/musl 静态链接顺序会失败 |
+
+> **为什么 apt/dnf 需要源码编译：** `protoc-gen-upb` 和 `protoc-gen-upb_minitable` 插件仅在 protobuf 30+ 中提供。Ubuntu 24.04、Debian 12 和 Fedora 41 仍发布 protobuf 3.21.x，其 `protoc` 无法生成 upb C 代码。
+
 ### 安装系统依赖
 
 #### Arch Linux
@@ -69,6 +82,25 @@ cd /path/to/zpayload-dumper
 zig build
 ```
 
+### Alpine Linux
+
+Alpine 的 `protobuf` 包（31.1+）包含 `protoc-gen-upb`，但 `upb` 仅以静态归档（`libupb.a`）形式提供。Zig 在 musl 目标上的链接器把静态库放在目标文件之前，导致 `upb_Arena_Free`、`upb_Decode` 等符号出现未定义错误。目前没有简单的变通方案；建议使用基于 glibc 的发行版（Arch、Gentoo、或从源码编译 protobuf 的 Ubuntu/Debian/Fedora）。
+
+### Docker 编译（任意系统）
+
+如果你的发行版不受支持，可以使用提供的 Docker 镜像：
+
+```bash
+docker compose run --rm builder
+```
+
+或直接用 Docker：
+
+```bash
+docker build -t zpayload-builder .
+docker run --rm -v .:/src zpayload-builder
+```
+
 ## 编译
 
 ```bash
@@ -87,9 +119,9 @@ zig build -Dbsdiff
 
 编译完成后，可通过 `zig build run -- ...` 直接运行，或从安装前缀的 `bin/zpayload-dumper` 调用。
 
-> **平台支持：** `main` 分支仅针对 Linux。Windows 交叉编译和原生构建在 [`feat/windows-support`](../../tree/feat/windows-support) 分支维护。
+> **平台支持：** `main` 分支仅针对 Linux。Windows 交叉编译和原生构建在 [`feat/windows-support`](../../tree/feat/windows-support) 分支维护，该分支采用混合依赖模型：POSIX 目标链接系统库（`upb`、`utf8_range`、`bz2`），Windows 则从源码编译自带的 vendor 版本。
 >
-> **异步实验：** [`feat/async-engine`](../../tree/feat/async-engine) 分支将手动线程池替换为 `std.Io.Group.concurrent`，并可在上游稳定运行后接入 `std.Io.Uring`（io_uring）。Zig 0.16.0 的 `std.Io.Uring` 需要编译修复 [PR #31764](https://codeberg.org/ziglang/zig/pulls/31764)（`Dir.OpenError` / `Dir.RealPathFileError` 缺少 `ReadOnlyFileSystem`），但即使修复后运行时仍会在 `CancelRegion.init` 的 fiber 上下文切换中崩溃，因此该后端在该分支上保持禁用。
+> **异步实验：** [`feat/async-engine`](../../tree/feat/async-engine) 分支将手动线程池替换为 `std.Io.Group.concurrent`（运行在默认的基于线程的 `std.Io` 运行时上）。该分支包含一个实验性的 `std.Io.Uring`（io_uring）后端，但已被完全禁用——虽然配合 PR #31764 可以编译通过，但运行时会在 `CancelRegion.init` 的 fiber 上下文切换中崩溃。
 
 ## 用法
 
@@ -139,6 +171,7 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 
 - 不支持的参数或缺少输入文件时，程序会输出简要的着色 usage 信息，并以退出码 `2` 结束。
 - `--help` 和 `--version` 以退出码 `0` 结束。
+- 运行时错误（I/O 失败、payload 解析错误、磁盘空间不足、校验和不匹配等）以退出码 `1` 结束。
 
 ### 颜色与环境变量
 
@@ -177,6 +210,12 @@ zig build run -- --old old_images/ -p boot,vendor -o new_images/ incremental_pay
 
 ```bash
 zig build test
+```
+
+### 质量门控（与 `test` 相同）
+
+```bash
+zig build check
 ```
 
 ### 压力测试
@@ -263,7 +302,7 @@ uv run --project scripts payload-gen sample --name bench128 --total-mb 128
 
 # 错误样本
 uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
-uv run --project scripts payload-gen sample --name fixture-matrix --scenario all --total-mb 32
+uv run --project scripts payload-gen sample --name all-scenarios --scenario all --total-mb 32
 ```
 
 输出会放到 `tests/data/`（该目录被 git 忽略），然后可以验证：

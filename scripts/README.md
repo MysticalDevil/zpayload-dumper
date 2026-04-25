@@ -5,7 +5,7 @@ A standalone Python toolkit for generating synthetic Android OTA `payload.bin` t
 It is useful for:
 
 - Testing Android OTA payload dumpers / extractors
-- Generating reproducible regression test fixtures
+- Generating reproducible regression test samples
 - CI pipelines that need valid and invalid payload samples
 - Benchmarking extraction tools with controlled inputs
 

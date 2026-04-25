@@ -163,12 +163,12 @@ FTF。
 
 增量 OTA 包含引用**设备当前分区**作为源的操作：
 
-- `SOURCE_COPY = 4`
-- `SOURCE_BSDIFF = 5`
-- `BSDIFF = 3`
-- `MOVE = 2`（已废弃）
+- `SOURCE_COPY = 4` — 从旧分区镜像原样复制指定数据块
+- `SOURCE_BSDIFF = 5` — 对旧分区数据应用 bsdiff 补丁
+- `BSDIFF = 3`（已废弃，现代 payload 中不会出现）
+- `MOVE = 2`（已废弃，现代 payload 中不会出现）
 
-应用这些操作需要原始分区镜像。仅读取 OTA 文件的提取工具，没有源镜像就无法重构最终镜像。
+应用这些操作需要原始分区镜像。工具必须被指定一个包含旧分区镜像的目录，以便读取源数据块并重构最终镜像。
 
 ### 社区参考
 
@@ -177,12 +177,14 @@ FTF。
 
 ### 项目状态
 
-| 方面 | 状态 |
-|------|------|
-| 完整（非增量）OTA | ✅ 支持 |
-| 增量 OTA | ❌ 不支持（设计上就不支持） |
+| 方面 | 状态 | 说明 |
+|------|------|------|
+| 完整（非增量）OTA | ✅ 支持 | |
+| `SOURCE_COPY` | ✅ 支持 | 需要 `--old <目录>` |
+| `SOURCE_BSDIFF` | ✅ 支持 | 需要 `--old <目录>` **且** 使用 `-Dbsdiff` 编译 |
+| 其他差分操作（`PUFFDIFF`、`BROTLI_BSDIFF`、`ZUCCHINI`、`LZ4DIFF_*`） | ❌ 不支持 | 见第 9 节 |
 
-**结论：** 这是设计上的取舍。独立提取工具没有源镜像，无法应用差分补丁。
+**结论：** 两种最常见的差分操作已支持。若 payload 包含 `SOURCE_BSDIFF`，请提供旧镜像目录（`--old`）并使用 `-Dbsdiff` 编译。
 
 ---
 
@@ -215,7 +217,7 @@ FTF。
 | 小米 | **TGZ/TAR** | 通常为 standard | ✅（支持从 tar/tar.gz/tgz 中直接提取 payload.bin） |
 | 摩托罗拉 | **sparsechunk** | 不适用 | ❌ |
 | 索尼 | **FTF** | 不适用 | ❌ |
-| 增量 OTA | 普通 ZIP | SOURCE_COPY、BSDIFF 等 | ❌（设计上不支持） |
+| 增量 OTA | 普通 ZIP | `SOURCE_COPY`、`SOURCE_BSDIFF` | ✅（需 `--old` 目录；`SOURCE_BSDIFF` 需 `-Dbsdiff`）
 
 ---
 
@@ -226,4 +228,4 @@ FTF。
    Brotli 解压器（或链接 `brotli` 库）。
 3. **其余格式**（OZIP、tar.md5、UPDATE.APP、sparsechunk、FTF）均不在
    `payload.bin` 提取工具的职责范围内。应通过本文档明确说明，避免用户提交无效 bug 报告。
-4. **增量 OTA** 应保持不支持；提取工具不是补丁应用工具。
+4. **增量 OTA** 的 `SOURCE_COPY` 和 `SOURCE_BSDIFF` 在提供旧分区镜像（`--old`）时已经可以完整提取。更冷门的差分格式（`PUFFDIFF`、`BROTLI_BSDIFF` 等）仍不支持。

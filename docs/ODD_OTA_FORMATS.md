@@ -173,13 +173,12 @@ partitioning may use standard payload.bin, but the traditional distribution path
 
 Incremental (delta) OTAs contain operations that reference the **current on-device partition** as a source:
 
-- `SOURCE_COPY = 4`
-- `SOURCE_BSDIFF = 5`
-- `BSDIFF = 3`
-- `MOVE = 2` (deprecated)
+- `SOURCE_COPY = 4` — copy extents from the old partition image unchanged
+- `SOURCE_BSDIFF = 5` — apply a bsdiff patch against the old partition data
+- `BSDIFF = 3` (deprecated, not present in modern payloads)
+- `MOVE = 2` (deprecated, not present in modern payloads)
 
-Applying these requires the original partition image. A dump tool that only reads the OTA file cannot reconstruct the final image
-without the source.
+Applying these requires the original partition image. The tool must be given a directory containing the old partition images so it can read source extents and reconstruct the final image.
 
 ### Community references
 
@@ -188,12 +187,14 @@ without the source.
 
 ### Project status
 
-| Aspect | Status |
-|--------|--------|
-| Full (non-incremental) OTA | ✅ Supported |
-| Delta OTA | ❌ Not supported (and unlikely to be) |
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| Full (non-incremental) OTA | ✅ Supported | |
+| `SOURCE_COPY` | ✅ Supported | Requires `--old <dir>` |
+| `SOURCE_BSDIFF` | ✅ Supported | Requires `--old <dir>` **and** compiling with `-Dbsdiff` |
+| Other delta ops (`PUFFDIFF`, `BROTLI_BSDIFF`, `ZUCCHINI`, `LZ4DIFF_*`) | ❌ Not supported | See section 9 |
 
-**Verdict:** By design. A standalone dumper cannot apply delta patches without source images.
+**Verdict:** Supported for the two most common delta operations. Provide the old image directory via `--old` and build with `-Dbsdiff` if the payload uses `SOURCE_BSDIFF`.
 
 ---
 
@@ -228,7 +229,7 @@ If a future firmware (e.g., a Pixel device adopting `BROTLI_BSDIFF`) uses any of
 | Xiaomi | **TGZ/TAR** | Usually standard | ✅ (extracts payload.bin from tar/tar.gz/tgz) |
 | Motorola | **sparsechunk** | N/A | ❌ |
 | Sony | **FTF** | N/A | ❌ |
-| Delta OTA | Plain ZIP | SOURCE_COPY, BSDIFF, etc. | ❌ (by design) |
+| Delta OTA | Plain ZIP | `SOURCE_COPY`, `SOURCE_BSDIFF` | ✅ (with `--old` dir; `SOURCE_BSDIFF` needs `-Dbsdiff`)
 
 ---
 
@@ -239,4 +240,4 @@ If a future firmware (e.g., a Pixel device adopting `BROTLI_BSDIFF`) uses any of
 `brotli`) would be the fix.
 3. **Everything else** (OZIP, tar.md5, UPDATE.APP, sparsechunk, FTF) is outside the scope of a `payload.bin` dumper. We should
 document this clearly so users do not file false-positive bug reports.
-4. **Delta OTA** should remain unsupported; a dumper is not a patch applier.
+4. **Delta OTA** is supported for `SOURCE_COPY` and `SOURCE_BSDIFF` when the old partition images are provided via `--old`. Full extraction of a delta payload is possible as long as the source images are available. More exotic delta formats (`PUFFDIFF`, `BROTLI_BSDIFF`, etc.) remain unsupported.

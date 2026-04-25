@@ -126,9 +126,9 @@ just release
 
 The artifact is placed in `release/` with `SHA256SUMS`.
 
-> **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch.
+> **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch, which uses a hybrid dependency model: POSIX targets link system libraries (`upb`, `utf8_range`, `bz2`), while Windows compiles vendored sources.
 >
-> **Async experiment:** The [`feat/async-engine`](../../tree/feat/async-engine) branch replaces the manual thread pool with `std.Io.Group.concurrent` and is ready for `std.Io.Uring` (io_uring) once upstream stabilizes the runtime. Zig 0.16.0's `std.Io.Uring` requires compile-fix [PR #31764](https://codeberg.org/ziglang/zig/pulls/31764) (`ReadOnlyFileSystem` missing from `Dir.OpenError` / `Dir.RealPathFileError`) and still segfaults at runtime in `CancelRegion.init` during fiber context switches, so the backend remains disabled on that branch.
+> **Async experiment:** The [`feat/async-engine`](../../tree/feat/async-engine) branch replaces the manual thread pool with `std.Io.Group.concurrent` (running on the default thread-based `std.Io` runtime). An experimental `std.Io.Uring` (io_uring) backend exists but is entirely disabled — it compiles with PR #31764 but segfaults at runtime in `CancelRegion.init` during fiber context switches.
 
 ## Usage
 
@@ -159,6 +159,7 @@ Error handling:
 
 - Unsupported arguments or missing input print a brief colored usage message and exit with code `2`.
 - `--help` and `--version` exit with code `0`.
+- Runtime errors (I/O failure, payload decode, disk space, checksum mismatch, etc.) exit with code `1`.
 
 Color precedence:
 
@@ -214,6 +215,12 @@ Tests:
 
 ```bash
 zig build test
+```
+
+Quality gate (same as `test`):
+
+```bash
+zig build check
 ```
 
 Stress tests:
@@ -331,7 +338,7 @@ uv run --project scripts payload-gen sample --name bench128 --total-mb 128
 
 # error test cases
 uv run --project scripts payload-gen sample --name bad-magic --scenario invalid_magic
-uv run --project scripts payload-gen sample --name fixture-matrix --scenario all --total-mb 32
+uv run --project scripts payload-gen sample --name all-scenarios --scenario all --total-mb 32
 ```
 
 Then verify with the dumper:
