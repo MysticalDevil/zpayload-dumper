@@ -183,8 +183,11 @@ pub fn run(
     }
 
     const available_bytes = platform.availableBytes(output_dir) catch |err| {
-        const msg = std.fmt.allocPrint(allocator, "failed to check disk space for output directory '{s}'", .{output_dir}) catch null;
-        if (msg) |m| collector.addOwned(m);
+        const msg = std.fmt.allocPrint(allocator, "failed to check disk space for output directory '{s}'", .{output_dir}) catch {
+            collector.markDropped();
+            return err;
+        };
+        collector.addOwned(msg);
         return err;
     };
 
@@ -193,8 +196,11 @@ pub fn run(
         var avail_buf: [64]u8 = undefined;
         const req_str = formatSize(&req_buf, required_bytes);
         const avail_str = formatSize(&avail_buf, available_bytes);
-        const msg = std.fmt.allocPrint(allocator, "insufficient disk space: output directory '{s}' requires {s} but only {s} is available", .{ output_dir, req_str, avail_str }) catch null;
-        if (msg) |m| collector.addOwned(m);
+        const msg = std.fmt.allocPrint(allocator, "insufficient disk space: output directory '{s}' requires {s} but only {s} is available", .{ output_dir, req_str, avail_str }) catch {
+            collector.markDropped();
+            return error.InsufficientDiskSpace;
+        };
+        collector.addOwned(msg);
         return error.InsufficientDiskSpace;
     }
 
@@ -319,16 +325,26 @@ pub fn run(
             const data_to_write = switch (chunk.data) {
                 .memory => |mem| mem,
                 .tmp_file => |path| readSpillFile(&shared, path) catch |err| {
-                    const msg = std.fmt.allocPrint(allocator, "failed to read spill file for pending op {d} of {s}: {s}", .{ chunk.op_index, part.job.name, @errorName(err) }) catch null;
-                    if (msg) |m| collector.addOwned(m);
+                    const msg = std.fmt.allocPrint(allocator, "failed to read spill file for pending op {d} of {s}: {s}", .{ chunk.op_index, part.job.name, @errorName(err) }) catch {
+                        collector.markDropped();
+                        cleanupPendingData(io, shared.allocator, &budget, &chunk);
+                        part.has_errors.store(true, .release);
+                        break;
+                    };
+                    collector.addOwned(msg);
                     cleanupPendingData(io, shared.allocator, &budget, &chunk);
                     part.has_errors.store(true, .release);
                     break;
                 },
             };
             const success = writeOpData(io, part.output_file, &writer_buf, op, data_to_write) catch |err| {
-                const msg = std.fmt.allocPrint(allocator, "failed to drain pending op {d} for {s}: {s}", .{ chunk.op_index, part.job.name, @errorName(err) }) catch null;
-                if (msg) |m| collector.addOwned(m);
+                const msg = std.fmt.allocPrint(allocator, "failed to drain pending op {d} for {s}: {s}", .{ chunk.op_index, part.job.name, @errorName(err) }) catch {
+                    collector.markDropped();
+                    cleanupPendingData(io, shared.allocator, &budget, &chunk);
+                    part.has_errors.store(true, .release);
+                    break;
+                };
+                collector.addOwned(msg);
                 cleanupPendingData(io, shared.allocator, &budget, &chunk);
                 part.has_errors.store(true, .release);
                 break;
@@ -810,19 +826,28 @@ fn mapSpillWriterError(writer: *const std.Io.File.Writer) Error {
 }
 
 fn recordError(shared: *Shared, part: *PartitionWriteState, operation_index: usize, err: Error) void {
-    const msg = if (err == error.MissingOldImage)
-        std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s} (use --old <dir> to provide source partition images for delta payload)", .{
+    const msg = if (err == error.MissingOldImage) blk: {
+        break :blk std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s} (use --old <dir> to provide source partition images for delta payload)", .{
             part.job.name,
             operation_index,
             @errorName(err),
-        }) catch null
-    else
-        std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s}", .{
+        }) catch {
+            shared.collector.markDropped();
+            part.has_errors.store(true, .release);
+            return;
+        };
+    } else blk: {
+        break :blk std.fmt.allocPrint(shared.allocator, "failed to process {s} op{d}: {s}", .{
             part.job.name,
             operation_index,
             @errorName(err),
-        }) catch null;
-    if (msg) |m| shared.collector.addOwned(m);
+        }) catch {
+            shared.collector.markDropped();
+            part.has_errors.store(true, .release);
+            return;
+        };
+    };
+    shared.collector.addOwned(msg);
     part.has_errors.store(true, .release);
 }
 

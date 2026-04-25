@@ -16,6 +16,8 @@ pub fn userMessage(err: Error) []const u8 {
         error.TempDirectoryCleanupFailed => "failed to cleanup the temporary extraction directory",
         error.ArchiveReadFailed => "failed to read archive content",
         error.ArchiveWriteFailed => "failed to write extracted archive content",
+        error.InputFileNotFound => "input payload file not found",
+        error.InputFileAccessDenied => "permission denied while opening input payload file",
         error.InvalidMagic => "invalid payload magic, expected CrAU",
         error.UnsupportedPayloadVersion => "unsupported payload version (expected 2)",
         error.ManifestNotInitialized => "payload manifest is not initialized",

@@ -147,7 +147,22 @@ pub const ErrorCollector = struct {
             self.dropped = true;
         };
     }
+
+    pub fn markDropped(self: *ErrorCollector) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        self.dropped = true;
+    }
 };
+
+test "ErrorCollector treats dropped messages as errors" {
+    var collector = ErrorCollector.init(std.testing.allocator, std.testing.io);
+    defer collector.deinit();
+
+    try std.testing.expect(!collector.hasErrors());
+    collector.markDropped();
+    try std.testing.expect(collector.hasErrors());
+}
 
 pub const Sink = struct {
     render_fn: *const fn (tracker: *ProgressTracker, reporter: *const Reporter, prev_lines: *usize) Error!void,

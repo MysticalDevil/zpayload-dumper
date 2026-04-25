@@ -31,7 +31,11 @@ pub const Payload = struct {
     ctx_initialized: bool = false,
 
     pub fn open(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) Error!Payload {
-        const file = std.Io.Dir.cwd().openFile(io, filename, .{}) catch return error.IoFailure;
+        const file = std.Io.Dir.cwd().openFile(io, filename, .{}) catch |err| switch (err) {
+            error.FileNotFound => return error.InputFileNotFound,
+            error.AccessDenied => return error.InputFileAccessDenied,
+            else => return error.IoFailure,
+        };
         return .{
             .allocator = allocator,
             .io = io,
@@ -296,6 +300,13 @@ pub const Payload = struct {
         if (worker_failed.load(.acquire)) return error.IoFailure;
     }
 };
+
+test "open reports missing input file explicitly" {
+    try std.testing.expectError(
+        error.InputFileNotFound,
+        Payload.open(std.testing.allocator, std.testing.io, "tests/data/generated/does-not-exist/payload.bin"),
+    );
+}
 
 fn dryRunWorker(task: DryRunTask) void {
     const base_delay_ms: u64 = 20;

@@ -29,6 +29,7 @@ pub fn run(
             if (value < 1) return error.InvalidConcurrency;
             break :blk @as(usize, @intCast(value));
         }
+        // CPU count only tunes parallelism; single-worker extraction is the safe fallback.
         const cpu_count = std.Thread.getCpuCount() catch 1;
         break :blk @max(1, cpu_count / 2);
     };

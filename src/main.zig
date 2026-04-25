@@ -17,6 +17,8 @@ fn suggestionForError(err: Error) ?[]const u8 {
         error.TarDecompressTruncated => "re-download the tar archive and retry extraction",
         error.InvalidMagic => "ensure the file is a valid payload.bin (expected CrAU header)",
         error.UnsupportedPayloadVersion => "ensure the payload uses version 2",
+        error.InputFileNotFound => "verify the input file path exists",
+        error.InputFileAccessDenied => "verify the input file is readable",
         error.InvalidPartitionName => "ensure the payload manifest does not contain unsafe partition names",
         error.InsufficientDiskSpace => "specify a different output directory with -o or free up disk space",
         error.TempDirectoryUnavailable => "set TMPDIR to a writable location or create ./.tmp",
@@ -62,6 +64,7 @@ fn run(init: std.process.Init, main_stderr: *std.Io.Writer) Error!void {
 
     var stderr_file = std.Io.File.stderr();
     const terminal = cli.types.TerminalCapabilities{
+        // TTY detection only controls presentation; fall back to plain output.
         .stdout_is_tty = stdout_file.isTty(io) catch false,
         .stderr_is_tty = stderr_file.isTty(io) catch false,
     };
