@@ -448,7 +448,7 @@ GOOS=windows GOARCH=amd64 go build
 zig build -Dtarget=aarch64-linux-gnu   # 需要 ARM64 版 upb/utf8_range/bz2
 ```
 
-Go 的纯 Go 依赖使交叉编译非常顺畅。Zig 的 C 依赖（`upb`、`utf8_range`、`bz2`）需要这些库的交叉编译版本，或为目标平台从源码构建。main 分支暂不支持 Windows 交叉编译。
+Go 的纯 Go 依赖使交叉编译非常顺畅。Zig 的 C 依赖（`upb`、`utf8_range`、`bz2`）需要这些库的交叉编译版本，或为目标平台从源码构建。`main` 分支暂不支持 Windows 交叉编译，见 [`feat/windows-support`](../../tree/feat/windows-support) 分支。
 
 ### 10.6 并发模型清晰度
 
