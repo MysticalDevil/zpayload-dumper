@@ -10,6 +10,7 @@ pub const block_size: u64 = 4096;
 pub const Error = errors.AppError;
 pub const Reporter = progress.Reporter;
 pub const Sink = progress.Sink;
+pub const jsonSink = progress.jsonSink;
 
 const DryRunTask = struct {
     tracker: *progress.ProgressTracker,
@@ -96,6 +97,40 @@ pub const Payload = struct {
             printSizeKbMb(writer, ctx.partitionSize(index)) catch return error.IoFailure;
             writer.writeAll(")\n") catch return error.IoFailure;
         }
+    }
+
+    pub fn printPartitionListJson(self: *Payload, writer: *std.Io.Writer) Error!void {
+        if (!self.ctx_initialized) return error.ManifestNotInitialized;
+        const ctx = self.ctx;
+        const count = ctx.partitionCount();
+
+        const ManifestInfo = struct {
+            type: []const u8,
+            total: usize,
+            partitions: []const PartitionInfo,
+            const PartitionInfo = struct {
+                name: []const u8,
+                size_bytes: u64,
+            };
+        };
+
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const aa = arena.allocator();
+
+        var parts = std.array_list.Managed(ManifestInfo.PartitionInfo).init(aa);
+        var index: usize = 0;
+        while (index < count) : (index += 1) {
+            const name = ctx.partitionName(index) orelse continue;
+            try parts.append(.{ .name = name, .size_bytes = ctx.partitionSize(index) });
+        }
+
+        std.json.Stringify.value(ManifestInfo{
+            .type = "partitions",
+            .total = count,
+            .partitions = parts.items,
+        }, .{}, writer) catch return error.IoFailure;
+        writer.writeByte('\n') catch return error.IoFailure;
     }
 
     pub fn partitionCount(self: *Payload) Error!usize {

@@ -176,3 +176,53 @@ pub const Sink = struct {
     fn noopRender(_: *ProgressTracker, _: *const Reporter, _: *usize) Error!void {}
     fn noopPrintErrors(_: *ErrorCollector, _: *const Reporter) Error!void {}
 };
+
+pub fn renderProgressJson(tracker: *ProgressTracker, reporter: *const Reporter, prev_lines: *usize) Error!void {
+    _ = prev_lines;
+    tracker.mutex.lockUncancelable(tracker.io);
+    defer tracker.mutex.unlock(tracker.io);
+
+    for (tracker.entries) |entry| {
+        const done = @min(entry.done_ops, entry.total_ops);
+        const pct: u8 = if (entry.total_ops == 0) @as(u8, 100) else @as(u8, @intCast((done * 100) / entry.total_ops));
+        const state_str = switch (entry.state) {
+            .pending => "pending",
+            .running => "running",
+            .done => "done",
+            .failed => "failed",
+        };
+        std.json.Stringify.value(.{
+            .type = "progress",
+            .partition = entry.name,
+            .done = done,
+            .total = entry.total_ops,
+            .percent = pct,
+            .state = state_str,
+        }, .{}, reporter.out) catch return error.IoFailure;
+        reporter.out.writeByte('\n') catch return error.IoFailure;
+    }
+}
+
+pub fn printErrorsJson(collector: *ErrorCollector, reporter: *const Reporter) Error!void {
+    collector.mutex.lockUncancelable(collector.io);
+    defer collector.mutex.unlock(collector.io);
+    for (collector.messages.items) |msg| {
+        std.json.Stringify.value(.{
+            .type = "error",
+            .message = msg,
+        }, .{}, reporter.out) catch return error.IoFailure;
+        reporter.out.writeByte('\n') catch return error.IoFailure;
+    }
+    if (collector.dropped) {
+        std.json.Stringify.value(.{
+            .type = "error",
+            .message = "some worker errors could not be recorded due to allocation failure",
+        }, .{}, reporter.out) catch return error.IoFailure;
+        reporter.out.writeByte('\n') catch return error.IoFailure;
+    }
+}
+
+pub const jsonSink: Sink = .{
+    .render_fn = renderProgressJson,
+    .print_errors_fn = printErrorsJson,
+};
