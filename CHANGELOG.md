@@ -18,6 +18,8 @@
 - Progress tracking with TTY-aware rendering (dynamic multi-partition view vs line-based logs).
 - Environment variable color override (`ZPAYLOAD_COLOR`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`).
 - Centralized platform abstraction (`src/utils/platform.zig`) for OS-specific paths and APIs.
+- `--format=json` streaming progress output using `std.json.Stringify.value`, emitting one JSON object per line per partition. Errors are also reported as JSON. Ends with a `{"type":"done"}` line containing the output path.
+- `--list --format=json` outputs partition names, sizes (bytes), and total count as a single JSON object.
 
 ### Changed
 
