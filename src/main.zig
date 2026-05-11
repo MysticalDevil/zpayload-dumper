@@ -109,8 +109,9 @@ fn run(init: std.process.Init, main_stderr: *std.Io.Writer) Error!void {
                 .use_color = colors.stdout,
                 .dynamic = terminal.stdout_is_tty,
             };
+            const sink: payload.Sink = if (options.format == .json) payload.jsonSink else cli.render.sink;
             const build_options = @import("build_options");
-            cli.runner.run(init, &options, &ui, &reporter, build_options.bsdiff_enabled) catch |err| switch (err) {
+            cli.runner.run(init, &options, &ui, &reporter, build_options.bsdiff_enabled, sink) catch |err| switch (err) {
                 error.Usage => {
                     const help_colors = cli.parse.resolveColors(options.color_mode, terminal);
                     cli.help.renderUsage(&stdout.interface, help_colors.stdout) catch return error.IoFailure;

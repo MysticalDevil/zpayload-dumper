@@ -5,7 +5,6 @@ const input_mod = @import("../input/root.zig");
 const archive_common = input_mod.archive_common;
 const zip_payload = input_mod.payload_zip;
 const tar_payload = input_mod.payload_tar;
-const render = @import("render.zig");
 const types = @import("types.zig");
 const cli_ui = @import("ui.zig");
 const output = @import("output.zig");
@@ -20,6 +19,7 @@ pub fn run(
     ui: *const cli_ui.Ui,
     reporter: *const payload.Reporter,
     bsdiff_enabled: bool,
+    sink: payload.Sink,
 ) Error!void {
     const gpa = init.gpa;
     const io = init.io;
@@ -71,7 +71,7 @@ pub fn run(
             };
             defer dumper.deinit();
             try dumper.initFromMetadata(metadata.manifest, metadata.signature);
-            return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled);
+            return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled, sink);
         } else {
             ui.warn("tar input detected, reading payload metadata in memory for dry-run") catch return error.IoFailure;
             try logPath(ui, "input tar: {s}", options.input);
@@ -89,7 +89,7 @@ pub fn run(
             };
             defer dumper.deinit();
             try dumper.initFromMetadata(metadata.manifest, metadata.signature);
-            return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled);
+            return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled, sink);
         }
     } else {
         var effective_payload: []const u8 = options.input;
@@ -111,7 +111,7 @@ pub fn run(
         var dumper = try payload.Payload.open(gpa, io, effective_payload);
         defer dumper.deinit();
         try dumper.init();
-        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled);
+        return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled, sink);
     }
 }
 
@@ -123,24 +123,31 @@ fn runWithPayload(
     effective_concurrency: usize,
     is_archive_input: bool,
     bsdiff_enabled: bool,
+    sink: payload.Sink,
 ) Error!void {
     const gpa = dumper.allocator;
     const io = dumper.io;
 
-    if (is_archive_input and options.dry_run) {
-        try logPath(ui, "metadata source: {s}", "payload.bin inside archive (in-memory)");
-    }
+    const is_json = options.format == .json;
 
-    const partition_count = try dumper.partitionCount();
-    {
-        var partition_buffer: [128]u8 = undefined;
-        const partition_message = std.fmt.bufPrint(&partition_buffer, "manifest parsed, partitions: {d}", .{partition_count}) catch return error.IoFailure;
-        ui.info(partition_message) catch return error.IoFailure;
+    if (!is_json) {
+        if (is_archive_input and options.dry_run) {
+            try logPath(ui, "metadata source: {s}", "payload.bin inside archive (in-memory)");
+        }
+
+        const partition_count = try dumper.partitionCount();
+        {
+            var partition_buffer: [128]u8 = undefined;
+            const partition_message = std.fmt.bufPrint(&partition_buffer, "manifest parsed, partitions: {d}", .{partition_count}) catch return error.IoFailure;
+            ui.info(partition_message) catch return error.IoFailure;
+        }
+        dumper.printPartitionList(reporter.out) catch return error.IoFailure;
+    } else {
+        dumper.printPartitionListJson(reporter.out) catch return error.IoFailure;
     }
-    dumper.printPartitionList(reporter.out) catch return error.IoFailure;
 
     if (options.list) {
-        ui.success("list mode complete") catch return error.IoFailure;
+        if (!is_json) ui.success("list mode complete") catch return error.IoFailure;
         return;
     }
 
@@ -152,14 +159,20 @@ fn runWithPayload(
         owned_output = generated;
         break :blk generated;
     };
-    if (options.dry_run) {
-        try logPath(ui, "output dir (dry-run): {s}", out_path);
+    if (!is_json) {
+        if (options.dry_run) {
+            try logPath(ui, "output dir (dry-run): {s}", out_path);
+        } else {
+            std.Io.Dir.cwd().createDirPath(io, out_path) catch return error.IoFailure;
+            try logPath(ui, "output dir: {s}", out_path);
+        }
     } else {
-        std.Io.Dir.cwd().createDirPath(io, out_path) catch return error.IoFailure;
-        try logPath(ui, "output dir: {s}", out_path);
+        if (!options.dry_run) {
+            std.Io.Dir.cwd().createDirPath(io, out_path) catch return error.IoFailure;
+        }
     }
 
-    {
+    if (!is_json) {
         var workers_buffer: [96]u8 = undefined;
         const workers_message = std.fmt.bufPrint(&workers_buffer, "workers: {d}", .{effective_concurrency}) catch return error.IoFailure;
         ui.info(workers_message) catch return error.IoFailure;
@@ -170,7 +183,7 @@ fn runWithPayload(
         defer selected.deinit();
         try splitPartitions(&selected, parts_csv);
 
-        {
+        if (!is_json) {
             var select_buffer: [256]u8 = undefined;
             const select_message = blk: {
                 if (options.dry_run) {
@@ -182,21 +195,29 @@ fn runWithPayload(
         }
         const old_dir: ?[]const u8 = options.old_dir;
         if (options.dry_run) {
-            try dumper.extractSelectedDryRun(selected.items, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
+            try dumper.extractSelectedDryRun(selected.items, effective_concurrency, reporter, sink, old_dir, bsdiff_enabled);
         } else {
-            try dumper.extractSelected(out_path, selected.items, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
+            try dumper.extractSelected(out_path, selected.items, effective_concurrency, reporter, sink, old_dir, bsdiff_enabled);
         }
     } else {
         const old_dir: ?[]const u8 = options.old_dir;
-        ui.info(if (options.dry_run) "dry-run simulating all partitions" else "extracting all partitions") catch return error.IoFailure;
+        if (!is_json) ui.info(if (options.dry_run) "dry-run simulating all partitions" else "extracting all partitions") catch return error.IoFailure;
         if (options.dry_run) {
-            try dumper.extractSelectedDryRun(&.{}, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
+            try dumper.extractSelectedDryRun(&.{}, effective_concurrency, reporter, sink, old_dir, bsdiff_enabled);
         } else {
-            try dumper.extractSelected(out_path, &.{}, effective_concurrency, reporter, render.sink, old_dir, bsdiff_enabled);
+            try dumper.extractSelected(out_path, &.{}, effective_concurrency, reporter, sink, old_dir, bsdiff_enabled);
         }
     }
 
-    ui.success(if (options.dry_run) "dry-run complete" else "extraction complete") catch return error.IoFailure;
+    if (is_json) {
+        std.json.Stringify.value(.{
+            .type = "done",
+            .output = out_path,
+        }, .{}, reporter.out) catch return error.IoFailure;
+        reporter.out.writeByte('\n') catch return error.IoFailure;
+    } else {
+        ui.success(if (options.dry_run) "dry-run complete" else "extraction complete") catch return error.IoFailure;
+    }
 }
 
 fn splitPartitions(list: *std.array_list.Managed([]const u8), csv: []const u8) !void {
