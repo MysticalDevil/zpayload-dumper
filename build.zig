@@ -61,7 +61,10 @@ fn attachPayloadDeps(
 ) void {
     module.addImport("protobuf", protobuf_mod);
     module.addIncludePath(b.path("src/c"));
-    module.linkSystemLibrary("bz2", .{});
+    module.addIncludePath(b.path("vendor/bzip2"));
+    inline for (.{ "blocksort.c", "bzlib.c", "compress.c", "crctable.c", "decompress.c", "huffman.c", "randtable.c" }) |src| {
+        module.addCSourceFile(.{ .file = b.path("vendor/bzip2/" ++ src) });
+    }
 }
 
 fn attachIntegrationImport(module: *std.Build.Module, zpayload_mod: *std.Build.Module) void {
@@ -99,10 +102,11 @@ pub fn build(b: *std.Build) void {
 
     // --- Translate-C for bzip2 (compress_headers.h) ---
     const translate_compress = b.addTranslateC(.{
-        .root_source_file = b.path("src/c/compress_headers.h"),
+        .root_source_file = b.path("vendor/bzip2/bzlib.h"),
         .target = options.target,
         .optimize = options.optimize,
     });
+    translate_compress.addIncludePath(b.path("vendor/bzip2"));
 
     // --- Core modules ---
     const root_module = createRootModule(b, options, "src/main.zig");
