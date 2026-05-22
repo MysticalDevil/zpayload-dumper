@@ -1,6 +1,12 @@
 .{
     .name = .zpayload_dumper,
     .version = "0.0.1",
+    .dependencies = .{
+        .protobuf = .{
+            .url = "git+https://github.com/Arwalk/zig-protobuf?ref=master#81959a3f735e853dbb73caeec42b4084e4b0fc72",
+            .hash = "protobuf-5.0.0-0e82ahGcKACtHMDO4ELSBp4V7Hkgyd8W0BzW4EuJIWhe",
+        },
+    },
     .minimum_zig_version = "0.16.0",
     .paths = .{""},
     .fingerprint = 0x1f04bcd32c40d5b6,

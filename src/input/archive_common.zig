@@ -12,11 +12,9 @@ pub const ExtractResult = struct {
 
 pub const PayloadMetadata = struct {
     manifest: []u8,
-    signature: []u8,
 
     pub fn deinit(self: *PayloadMetadata, allocator: std.mem.Allocator) void {
         allocator.free(self.manifest);
-        allocator.free(self.signature);
     }
 };
 
@@ -56,20 +54,11 @@ pub fn parsePayloadHeaderBytes(prefix: []const u8) Error!header.Header {
 
 pub fn metadataFromHeaderAndPrefix(
     allocator: std.mem.Allocator,
-    payload_header: header.Header,
-    manifest_sig: []const u8,
+    _: header.Header,
+    manifest_bytes: []const u8,
 ) Error!PayloadMetadata {
-    const manifest_len = std.math.cast(usize, payload_header.manifest_len) orelse return error.IntegerOverflow;
-    const signature_len = std.math.cast(usize, payload_header.metadata_signature_len) orelse return error.IntegerOverflow;
-    if (manifest_sig.len != manifest_len + signature_len) return error.IntegerOverflow;
-
-    const manifest = try allocator.dupe(u8, manifest_sig[0..manifest_len]);
-    errdefer allocator.free(manifest);
-    const signature = try allocator.dupe(u8, manifest_sig[manifest_len..]);
-    return .{
-        .manifest = manifest,
-        .signature = signature,
-    };
+    const manifest = try allocator.dupe(u8, manifest_bytes);
+    return .{ .manifest = manifest };
 }
 
 pub fn selectTempBase(allocator: std.mem.Allocator) Error!TempBaseSelection {

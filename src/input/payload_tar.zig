@@ -88,15 +88,11 @@ fn readMetadataFromTarReader(allocator: std.mem.Allocator, reader: *std.Io.Reade
         defer allocator.free(header_prefix);
 
         const payload_header = try common.parsePayloadHeaderBytes(header_prefix);
-        const manifest_sig_len = std.math.cast(
-            usize,
-            payload_header.manifest_len + payload_header.metadata_signature_len,
-        ) orelse return error.IntegerOverflow;
+        const manifest_len = std.math.cast(usize, payload_header.manifest_len) orelse return error.IntegerOverflow;
+        const manifest_bytes = try readTarEntryPrefixAlloc(allocator, reader, file, manifest_len);
+        defer allocator.free(manifest_bytes);
 
-        const manifest_sig = try readTarEntryPrefixAlloc(allocator, reader, file, manifest_sig_len);
-        defer allocator.free(manifest_sig);
-
-        return try common.metadataFromHeaderAndPrefix(allocator, payload_header, manifest_sig);
+        return try common.metadataFromHeaderAndPrefix(allocator, payload_header, manifest_bytes);
     }
 
     return error.PayloadNotFoundInTar;

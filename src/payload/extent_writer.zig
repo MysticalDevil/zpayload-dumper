@@ -1,6 +1,6 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const upb = @import("../ffi/upb.zig");
+const proto = @import("../proto/chromeos_update_engine.pb.zig");
 
 pub const block_size: u64 = 4096;
 pub const Error = errors.AppError;
@@ -16,11 +16,10 @@ pub fn bytesForBlocks(num_blocks: u64) Error!u64 {
     return std.math.mul(u64, num_blocks, block_size) catch return error.IntegerOverflow;
 }
 
-pub fn sumExtentBytes(ctx: upb.Context, pidx: usize, oidx: usize, extent_count: usize) Error!usize {
+pub fn sumExtentBytes(extents: []const proto.Extent) Error!usize {
     var total: u64 = 0;
-    var eidx: usize = 0;
-    while (eidx < extent_count) : (eidx += 1) {
-        const extent_bytes = try bytesForBlocks(ctx.dstExtentNumBlocks(pidx, oidx, eidx));
+    for (extents) |extent| {
+        const extent_bytes = try bytesForBlocks(extent.num_blocks orelse 0);
         total = std.math.add(u64, total, extent_bytes) catch return error.IntegerOverflow;
     }
     return std.math.cast(usize, total) orelse return error.IntegerOverflow;

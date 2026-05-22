@@ -1,6 +1,6 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const upb = @import("../ffi/upb.zig");
+const proto = @import("../proto/chromeos_update_engine.pb.zig");
 const header = @import("header.zig");
 const progress = @import("progress.zig");
 const extract_plan = @import("extract_plan.zig");
@@ -28,8 +28,8 @@ pub const Payload = struct {
     header: header.Header = .{},
     metadata_size: u64 = 0,
     data_offset: u64 = 0,
-    ctx: upb.Context = undefined,
-    ctx_initialized: bool = false,
+    manifest: proto.DeltaArchiveManifest,
+    manifest_initialized: bool = false,
 
     pub fn open(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) Error!Payload {
         const file = std.Io.Dir.cwd().openFile(io, filename, .{}) catch |err| switch (err) {
@@ -44,15 +44,15 @@ pub const Payload = struct {
             .header = .{},
             .metadata_size = 0,
             .data_offset = 0,
-            .ctx = undefined,
-            .ctx_initialized = false,
+            .manifest = undefined,
+            .manifest_initialized = false,
         };
     }
 
     pub fn deinit(self: *Payload) void {
-        if (self.ctx_initialized) {
-            self.ctx.deinit();
-            self.ctx_initialized = false;
+        if (self.manifest_initialized) {
+            self.manifest.deinit(self.allocator);
+            self.manifest_initialized = false;
         }
         if (self.file) |file| file.close(self.io);
     }
@@ -63,46 +63,41 @@ pub const Payload = struct {
 
         const manifest_buf = try header.readAtAlloc(self.allocator, file, self.io, 24, self.header.manifest_len);
         defer self.allocator.free(manifest_buf);
-        const signature_off = 24 + self.header.manifest_len;
-        const signature_buf = try header.readAtAlloc(self.allocator, file, self.io, signature_off, self.header.metadata_signature_len);
-        defer self.allocator.free(signature_buf);
 
-        self.ctx = try upb.Context.init(manifest_buf, signature_buf);
-        self.ctx_initialized = true;
+        var manifest_reader = std.Io.Reader.fixed(manifest_buf);
+        self.manifest = proto.DeltaArchiveManifest.decode(&manifest_reader, self.allocator) catch return error.DecodeFailed;
+        self.manifest_initialized = true;
         self.metadata_size = 24 + self.header.manifest_len;
         self.data_offset = self.metadata_size + self.header.metadata_signature_len;
     }
 
-    pub fn initFromMetadata(self: *Payload, manifest: []const u8, signature: []const u8) Error!void {
+    pub fn initFromMetadata(self: *Payload, manifest_bytes: []const u8) Error!void {
         self.header = .{
             .version = 2,
-            .manifest_len = manifest.len,
-            .metadata_signature_len = signature.len,
+            .manifest_len = manifest_bytes.len,
+            .metadata_signature_len = 0,
         };
-        self.ctx = try upb.Context.init(manifest, signature);
-        self.ctx_initialized = true;
+        var manifest_reader = std.Io.Reader.fixed(manifest_bytes);
+        self.manifest = proto.DeltaArchiveManifest.decode(&manifest_reader, self.allocator) catch return error.DecodeFailed;
+        self.manifest_initialized = true;
         self.metadata_size = 24 + self.header.manifest_len;
         self.data_offset = self.metadata_size + self.header.metadata_signature_len;
     }
 
     pub fn printPartitionList(self: *Payload, writer: *std.Io.Writer) Error!void {
-        if (!self.ctx_initialized) return error.ManifestNotInitialized;
-        const ctx = self.ctx;
+        if (!self.manifest_initialized) return error.ManifestNotInitialized;
         writer.writeAll("Found partitions:\n") catch return error.IoFailure;
-        const count = ctx.partitionCount();
-        var index: usize = 0;
-        while (index < count) : (index += 1) {
-            const name = ctx.partitionName(index) orelse continue;
+        for (self.manifest.partitions.items) |part| {
+            const name = part.partition_name;
             writer.print("  {s} (", .{name}) catch return error.IoFailure;
-            printSizeKbMb(writer, ctx.partitionSize(index)) catch return error.IoFailure;
+            const size_bytes = if (part.new_partition_info) |info| info.size orelse 0 else 0;
+            printSizeKbMb(writer, size_bytes) catch return error.IoFailure;
             writer.writeAll(")\n") catch return error.IoFailure;
         }
     }
 
     pub fn printPartitionListJson(self: *Payload, writer: *std.Io.Writer) Error!void {
-        if (!self.ctx_initialized) return error.ManifestNotInitialized;
-        const ctx = self.ctx;
-        const count = ctx.partitionCount();
+        if (!self.manifest_initialized) return error.ManifestNotInitialized;
 
         const ManifestInfo = struct {
             type: []const u8,
@@ -119,23 +114,22 @@ pub const Payload = struct {
         const aa = arena.allocator();
 
         var parts = std.array_list.Managed(ManifestInfo.PartitionInfo).init(aa);
-        var index: usize = 0;
-        while (index < count) : (index += 1) {
-            const name = ctx.partitionName(index) orelse continue;
-            try parts.append(.{ .name = name, .size_bytes = ctx.partitionSize(index) });
+        for (self.manifest.partitions.items) |part| {
+            const size_bytes = if (part.new_partition_info) |info| info.size orelse 0 else 0;
+            try parts.append(.{ .name = part.partition_name, .size_bytes = size_bytes });
         }
 
         std.json.Stringify.value(ManifestInfo{
             .type = "partitions",
-            .total = count,
+            .total = self.manifest.partitions.items.len,
             .partitions = parts.items,
         }, .{}, writer) catch return error.IoFailure;
         writer.writeByte('\n') catch return error.IoFailure;
     }
 
     pub fn partitionCount(self: *Payload) Error!usize {
-        if (!self.ctx_initialized) return error.ManifestNotInitialized;
-        return self.ctx.partitionCount();
+        if (!self.manifest_initialized) return error.ManifestNotInitialized;
+        return self.manifest.partitions.items.len;
     }
 
     pub fn extractAll(
@@ -160,11 +154,10 @@ pub const Payload = struct {
         old_dir: ?[]const u8,
         bsdiff_enabled: bool,
     ) Error!void {
-        if (!self.ctx_initialized) return error.ManifestNotInitialized;
-        const ctx = self.ctx;
+        if (!self.manifest_initialized) return error.ManifestNotInitialized;
         if (concurrency < 1) return error.InvalidConcurrency;
 
-        var plan = try extract_plan.buildPlan(self.allocator, ctx, self.data_offset, selected);
+        var plan = try extract_plan.buildPlan(self.allocator, &self.manifest, self.data_offset, selected);
         defer plan.deinit();
 
         if (plan.jobs.len == 0) return;
@@ -268,11 +261,10 @@ pub const Payload = struct {
         old_dir: ?[]const u8,
         bsdiff_enabled: bool,
     ) Error!void {
-        if (!self.ctx_initialized) return error.ManifestNotInitialized;
-        const ctx = self.ctx;
+        if (!self.manifest_initialized) return error.ManifestNotInitialized;
         if (concurrency < 1) return error.InvalidConcurrency;
 
-        var plan = try extract_plan.buildPlan(self.allocator, ctx, self.data_offset, selected);
+        var plan = try extract_plan.buildPlan(self.allocator, &self.manifest, self.data_offset, selected);
         defer plan.deinit();
 
         if (plan.jobs.len == 0) return;
@@ -412,8 +404,8 @@ fn validateDryRunPrerequisites(
     for (jobs) |job| {
         for (job.operations) |op| {
             switch (op.op_type) {
-                .source_copy => if (old_dir == null) return error.MissingOldImage,
-                .source_bsdiff => {
+                .SOURCE_COPY => if (old_dir == null) return error.MissingOldImage,
+                .SOURCE_BSDIFF => {
                     if (!bsdiff_enabled) return error.UnhandledOperationType;
                     if (old_dir == null) return error.MissingOldImage;
                 },
@@ -426,7 +418,7 @@ fn validateDryRunPrerequisites(
 test "validateDryRunPrerequisites allows non-delta operations" {
     const extents = [_]extract_plan.Extent{.{ .start_block = 0, .num_blocks = 1, .offset_bytes = 0, .length_bytes = block_size }};
     const ops = [_]extract_plan.Operation{.{
-        .op_type = .replace,
+        .op_type = .REPLACE,
         .blob_offset = 0,
         .blob_length = 4,
         .expected_uncompressed = block_size,
@@ -450,7 +442,7 @@ test "validateDryRunPrerequisites allows non-delta operations" {
 test "validateDryRunPrerequisites requires old images for source copy" {
     const extents = [_]extract_plan.Extent{.{ .start_block = 0, .num_blocks = 1, .offset_bytes = 0, .length_bytes = block_size }};
     const ops = [_]extract_plan.Operation{.{
-        .op_type = .source_copy,
+        .op_type = .SOURCE_COPY,
         .blob_offset = 0,
         .blob_length = 0,
         .expected_uncompressed = block_size,
@@ -475,7 +467,7 @@ test "validateDryRunPrerequisites requires old images for source copy" {
 test "validateDryRunPrerequisites requires bsdiff support before old images" {
     const extents = [_]extract_plan.Extent{.{ .start_block = 0, .num_blocks = 1, .offset_bytes = 0, .length_bytes = block_size }};
     const ops = [_]extract_plan.Operation{.{
-        .op_type = .source_bsdiff,
+        .op_type = .SOURCE_BSDIFF,
         .blob_offset = 0,
         .blob_length = 4,
         .expected_uncompressed = block_size,

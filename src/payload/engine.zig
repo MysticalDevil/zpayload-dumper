@@ -1,6 +1,6 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const upb = @import("../ffi/upb.zig");
+const proto = @import("../proto/chromeos_update_engine.pb.zig");
 const compress = @import("../compress/root.zig");
 const progress = @import("progress.zig");
 const extent_writer = @import("extent_writer.zig");
@@ -607,17 +607,17 @@ fn materializeOperationBuffer(
     zero_buf: []u8,
 ) Error!usize {
     const written = switch (op.op_type) {
-        .replace => try compress.copyRawToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, compress_in_buf),
-        .replace_xz => try compress.decompressXzToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
-        .replace_bz => try compress.decompressBz2ToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, compress_in_buf, compress_out_buf),
-        .zstd => try compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
-        .zero => try materializeZeroBuffer(shared, op, hasher, buffer, zero_buf),
-        .source_copy => try materializeSourceCopy(shared, partition_name, op, hasher, buffer),
-        .source_bsdiff => try materializeSourceBsdiff(shared, partition_name, op, buffer),
+        .REPLACE => try compress.copyRawToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, compress_in_buf),
+        .REPLACE_XZ => try compress.decompressXzToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
+        .REPLACE_BZ => try compress.decompressBz2ToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, compress_in_buf, compress_out_buf),
+        .ZSTD => try compress.decompressZstdToWriter(shared.payload_file, shared.io, op.blob_offset, op.blob_length, hasher, &buffer.writer, shared.allocator),
+        .ZERO => try materializeZeroBuffer(shared, op, hasher, buffer, zero_buf),
+        .SOURCE_COPY => try materializeSourceCopy(shared, partition_name, op, hasher, buffer),
+        .SOURCE_BSDIFF => try materializeSourceBsdiff(shared, partition_name, op, buffer),
         else => return error.UnhandledOperationType,
     };
 
-    if (op.op_type != .source_bsdiff) {
+    if (op.op_type != .SOURCE_BSDIFF) {
         try verifySha256Hash(op.sha256, hasher);
     }
     if (written != op.expected_uncompressed) return error.UnexpectedBytesWritten;
