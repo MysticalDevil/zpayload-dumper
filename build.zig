@@ -57,24 +57,10 @@ fn createTestRun(
 fn attachPayloadDeps(
     b: *std.Build,
     module: *std.Build.Module,
-    upb_out: std.Build.LazyPath,
-    minitable_out: std.Build.LazyPath,
+    protobuf_mod: *std.Build.Module,
 ) void {
-    module.addIncludePath(upb_out);
-    module.addIncludePath(minitable_out);
+    module.addImport("protobuf", protobuf_mod);
     module.addIncludePath(b.path("src/c"));
-    module.addCSourceFile(.{
-        .file = upb_out.path(b, "update_metadata.upb.c"),
-    });
-    module.addCSourceFile(.{
-        .file = minitable_out.path(b, "update_metadata.upb_minitable.c"),
-    });
-    module.addCSourceFile(.{
-        .file = b.path("src/c/upb_wrap.c"),
-    });
-
-    module.linkSystemLibrary("upb", .{});
-    module.linkSystemLibrary("utf8_range", .{});
     module.linkSystemLibrary("bz2", .{});
 }
 
@@ -104,39 +90,37 @@ pub fn build(b: *std.Build) void {
     build_options.addOption([]const u8, "local_cache_dir", local_cache_dir);
     build_options.addOption(bool, "bsdiff_enabled", bsdiff_enabled);
 
-    const protoc = b.addSystemCommand(&.{"protoc"});
-    const upb_out = protoc.addPrefixedOutputDirectoryArg("--upb_out=", "proto_upb");
-    const minitable_out = protoc.addPrefixedOutputDirectoryArg("--upb_minitable_out=", "proto_minitable");
-    protoc.addArg("--proto_path=proto");
-    protoc.addArg("update_metadata.proto");
-
-    const translate_upb = b.addTranslateC(.{
-        .root_source_file = b.path("src/c/upb_wrap.h"),
+    // --- zig-protobuf dependency ---
+    const protobuf_dep = b.dependency("protobuf", .{
         .target = options.target,
         .optimize = options.optimize,
     });
+    const protobuf_mod = protobuf_dep.module("protobuf");
+
+    // --- Translate-C for bzip2 (compress_headers.h) ---
     const translate_compress = b.addTranslateC(.{
         .root_source_file = b.path("src/c/compress_headers.h"),
         .target = options.target,
         .optimize = options.optimize,
     });
 
+    // --- Core modules ---
     const root_module = createRootModule(b, options, "src/main.zig");
     root_module.addOptions("build_options", build_options);
-    attachPayloadDeps(b, root_module, upb_out, minitable_out);
+    attachPayloadDeps(b, root_module, protobuf_mod);
 
     const zpayload_mod = createRootModule(b, options, "src/root.zig");
-    attachPayloadDeps(b, zpayload_mod, upb_out, minitable_out);
+    attachPayloadDeps(b, zpayload_mod, protobuf_mod);
 
-    root_module.addImport("upb", translate_upb.createModule());
     root_module.addImport("compress", translate_compress.createModule());
-    zpayload_mod.addImport("upb", translate_upb.createModule());
     zpayload_mod.addImport("compress", translate_compress.createModule());
 
+    // --- Executable ---
     const exe = createNamedExecutable(b, "zpayload-dumper", root_module);
     b.installArtifact(exe);
     addRunStep(b, "run", "Run zpayload-dumper", exe);
 
+    // --- Tests ---
     const run_tests = createTestRun(b, root_module);
     const integration_module = createRootModule(b, options, "tests/integration.zig");
     integration_module.addOptions("build_options", build_options);

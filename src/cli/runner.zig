@@ -66,11 +66,11 @@ pub fn run(
                 .header = .{},
                 .metadata_size = 0,
                 .data_offset = 0,
-                .ctx = undefined,
-                .ctx_initialized = false,
+                .manifest = undefined,
+                .manifest_initialized = false,
             };
             defer dumper.deinit();
-            try dumper.initFromMetadata(metadata.manifest, metadata.signature);
+            try dumper.initFromMetadata(metadata.manifest);
             return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled, sink);
         } else {
             ui.warn("tar input detected, reading payload metadata in memory for dry-run") catch return error.IoFailure;
@@ -84,11 +84,11 @@ pub fn run(
                 .header = .{},
                 .metadata_size = 0,
                 .data_offset = 0,
-                .ctx = undefined,
-                .ctx_initialized = false,
+                .manifest = undefined,
+                .manifest_initialized = false,
             };
             defer dumper.deinit();
-            try dumper.initFromMetadata(metadata.manifest, metadata.signature);
+            try dumper.initFromMetadata(metadata.manifest);
             return runWithPayload(&dumper, options, ui, reporter, effective_concurrency, is_archive_input, bsdiff_enabled, sink);
         }
     } else {

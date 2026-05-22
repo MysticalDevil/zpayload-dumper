@@ -57,12 +57,11 @@ pub fn readPayloadMetadataFromZip(allocator: std.mem.Allocator, io: std.Io, zip_
         defer allocator.free(header_prefix);
 
         const payload_header = try common.parsePayloadHeaderBytes(header_prefix);
-        const total_prefix_len_u64 = 24 + payload_header.manifest_len + payload_header.metadata_signature_len;
-        const total_prefix_len = std.math.cast(usize, total_prefix_len_u64) orelse return error.IntegerOverflow;
-        const full_prefix = try readEntryPrefixAlloc(allocator, &fr, entry, total_prefix_len);
-        defer allocator.free(full_prefix);
+        const manifest_len = std.math.cast(usize, payload_header.manifest_len) orelse return error.IntegerOverflow;
+        const manifest_bytes = try readEntryPrefixAlloc(allocator, &fr, entry, 24 + manifest_len);
+        defer allocator.free(manifest_bytes);
 
-        return try common.metadataFromHeaderAndPrefix(allocator, payload_header, full_prefix[24..]);
+        return try common.metadataFromHeaderAndPrefix(allocator, payload_header, manifest_bytes[24..]);
     }
 
     return error.PayloadNotFoundInZip;

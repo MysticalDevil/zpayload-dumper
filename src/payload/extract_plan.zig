@@ -1,13 +1,13 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const upb = @import("../ffi/upb.zig");
+const proto = @import("../proto/chromeos_update_engine.pb.zig");
 const extent_writer = @import("extent_writer.zig");
 
 pub const Extent = extent_writer.Extent;
 pub const Error = errors.AppError;
 
 pub const Operation = struct {
-    op_type: upb.OperationType,
+    op_type: proto.InstallOperation.Type,
     blob_offset: u64,
     blob_length: u64,
     expected_uncompressed: u64,
@@ -37,7 +37,7 @@ pub const Plan = struct {
 
 pub fn buildPlan(
     allocator: std.mem.Allocator,
-    ctx: upb.Context,
+    manifest: *const proto.DeltaArchiveManifest,
     data_offset: u64,
     selected: []const []const u8,
 ) Error!Plan {
@@ -45,37 +45,35 @@ pub fn buildPlan(
     errdefer arena.deinit();
     const aa = arena.allocator();
 
-    const part_count = ctx.partitionCount();
     var jobs = std.array_list.Managed(PartitionJob).init(aa);
 
-    var partition_index: usize = 0;
-    while (partition_index < part_count) : (partition_index += 1) {
-        const name_raw = ctx.partitionName(partition_index) orelse continue;
+    for (manifest.partitions.items, 0..) |partition, partition_index| {
+        const name_raw = partition.partition_name;
         try validatePartitionName(name_raw);
         if (selected.len != 0 and !containsPartition(selected, name_raw)) continue;
 
         const name = try aa.dupe(u8, name_raw);
-        const op_count = ctx.operationCount(partition_index);
+        const op_count = partition.operations.items.len;
         var operations = try aa.alloc(Operation, op_count);
 
         var total_output_bytes: u64 = 0;
-        var operation_index: usize = 0;
-        while (operation_index < op_count) : (operation_index += 1) {
-            const extent_count = ctx.dstExtentCount(partition_index, operation_index);
-            if (extent_count == 0) return error.InvalidDstExtents;
 
-            const blob_len_u64 = ctx.operationDataLength(partition_index, operation_index);
-            const blob_off_u64 = ctx.operationDataOffset(partition_index, operation_index);
+        for (partition.operations.items, 0..) |op, operation_index| {
+            if (op.dst_extents.items.len == 0) return error.InvalidDstExtents;
+
+            const blob_off_u64 = op.data_offset orelse 0;
+            const blob_len_u64 = op.data_length orelse 0;
             const blob_abs = std.math.add(u64, data_offset, blob_off_u64) catch return error.IntegerOverflow;
-            const expected_uncompressed = try extent_writer.sumExtentBytes(ctx, partition_index, operation_index, extent_count);
-            const op_type = ctx.operationType(partition_index, operation_index) orelse return error.UnhandledOperationType;
+            const expected_uncompressed = try extent_writer.sumExtentBytes(op.dst_extents.items);
+            const op_type = op.type;
 
+            // Convert proto dst extents to internal Extent format, merging adjacent ones
+            const extent_count = op.dst_extents.items.len;
             var extents = try aa.alloc(Extent, extent_count);
             var merged_count: usize = 0;
-            var extent_idx: usize = 0;
-            while (extent_idx < extent_count) : (extent_idx += 1) {
-                const start_block = ctx.dstExtentStartBlock(partition_index, operation_index, extent_idx);
-                const num_blocks = ctx.dstExtentNumBlocks(partition_index, operation_index, extent_idx);
+            for (op.dst_extents.items) |dst_extent| {
+                const start_block = dst_extent.start_block orelse 0;
+                const num_blocks = dst_extent.num_blocks orelse 0;
                 if (num_blocks == 0) continue;
                 const offset_bytes = try extent_writer.bytesForBlocks(start_block);
                 const length_bytes = try extent_writer.bytesForBlocks(num_blocks);
@@ -98,14 +96,13 @@ pub fn buildPlan(
                 extents = shrunk;
             }
 
-            // Build src_extents (for delta operations like SOURCE_COPY, SOURCE_BSDIFF)
-            const src_extent_count = ctx.srcExtentCount(partition_index, operation_index);
+            // Convert proto src extents
+            const src_extent_count = op.src_extents.items.len;
             var src_extents = try aa.alloc(Extent, @max(src_extent_count, 1));
             var src_merged_count: usize = 0;
-            var src_extent_idx: usize = 0;
-            while (src_extent_idx < src_extent_count) : (src_extent_idx += 1) {
-                const start_block = ctx.srcExtentStartBlock(partition_index, operation_index, src_extent_idx);
-                const num_blocks = ctx.srcExtentNumBlocks(partition_index, operation_index, src_extent_idx);
+            for (op.src_extents.items) |src_extent| {
+                const start_block = src_extent.start_block orelse 0;
+                const num_blocks = src_extent.num_blocks orelse 0;
                 if (num_blocks == 0) continue;
                 const offset_bytes = try extent_writer.bytesForBlocks(start_block);
                 const length_bytes = try extent_writer.bytesForBlocks(num_blocks);
@@ -129,15 +126,12 @@ pub fn buildPlan(
             } else if (src_extent_count == 0) {
                 src_extents = src_extents[0..0];
             }
-            const src_length = ctx.srcLength(partition_index, operation_index);
+            const src_length = op.src_length orelse 0;
 
             total_output_bytes = std.math.add(u64, total_output_bytes, expected_uncompressed) catch return error.IntegerOverflow;
 
-            const sha256_raw = ctx.operationSha256(partition_index, operation_index);
-            const sha256: ?[]const u8 = if (sha256_raw) |s| try aa.dupe(u8, s) else null;
-
-            const src_sha256_raw = ctx.operationSrcSha256(partition_index, operation_index);
-            const src_sha256: ?[]const u8 = if (src_sha256_raw) |s| try aa.dupe(u8, s) else null;
+            const sha256: ?[]const u8 = if (op.data_sha256_hash) |s| try aa.dupe(u8, s) else null;
+            const src_sha256: ?[]const u8 = if (op.src_sha256_hash) |s| try aa.dupe(u8, s) else null;
 
             operations[operation_index] = .{
                 .op_type = op_type,
