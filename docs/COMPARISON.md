@@ -257,8 +257,8 @@ zpayload-dumper/
 │   │   ├── extent_writer.zig
 │   │   ├── progress.zig
 │   │   └── root.zig
-│   ├── ffi/               # C FFI wrappers
-│   │   └── upb.zig
+│   ├── proto/             # Generated protobuf code (committed)
+│   │   └── chromeos_update_engine.pb.zig
 │   ├── input/             # Archive input handling (zip, tar)
 │   │   ├── archive_common.zig
 │   │   ├── payload_zip.zig
@@ -370,11 +370,12 @@ require (
 // No external Zig packages; only system libraries.
 ```
 
-- **Runtime**: Zig standard library + system C libraries (`upb`, `utf8_range`, `bz2`).
-  XZ and Zstd use Zig's native `std.compress` implementations; only bzip2 still
-  requires `libbz2.so`.
-- **Build**: `zig build` (single command, but requires `upb`, `utf8_range`, and `bz2` installed).
-- **Protobuf**: `protoc` with `--upb_out` (C code, translated to Zig via `addTranslateC`).
+- **Runtime**: Zig standard library + libc only (`link_libc = true`).
+  No external system libraries required — protobuf is decoded via pure-Zig [zig-protobuf](https://github.com/Arwalk/zig-protobuf),
+  bzip2 is compiled from vendored source (`vendor/bzip2`). XZ and Zstd use Zig's native `std.compress`.
+- **Build**: `zig build` (single command, zero system deps beyond libc).
+- **Protobuf**: Pre-generated Zig code from `update_metadata.proto` via `protoc-gen-zig`,
+  committed as `src/proto/chromeos_update_engine.pb.zig`. No `protoc` needed at build time.
 
 ---
 
@@ -423,13 +424,13 @@ At ~650 lines of core code vs ~2,900, the Go version is **dramatically easier to
 # Go: one command, zero system dependencies
 go build
 
-# Zig: requires a few system C libraries
-zig build   # fails if upb, utf8_range, or bz2 are missing
+# Zig: zero system deps beyond libc
+zig build
 ```
 
 The Go version bundles all compression libraries through pure-Go or cgo-wrapped modules (`gozstd`, `go-xz`, standard
-`compress/bzip2`). The Zig version uses Zig's native `std.compress` for XZ and Zstd, so the only remaining system
-dependencies are `upb`, `utf8_range`, and `bz2` for protobuf parsing and bzip2 decompression.
+`compress/bzip2`). The Zig version now uses zig-protobuf (pure Zig) for protobuf and vendored bzip2 source — no
+external C system libraries are required beyond libc.
 
 ### 10.3 Memory Safety Without Effort
 
@@ -460,12 +461,13 @@ overhead and increases the risk of bugs.
 # Go: trivial cross-compilation
 GOOS=windows GOARCH=amd64 go build
 
-# Zig: also excellent cross-compilation, but requires C library cross-compilation too
-zig build -Dtarget=aarch64-linux-gnu   # need ARM64 upb/utf8_range/bz2
+# Zig: also excellent cross-compilation
+zig build -Dtarget=aarch64-linux-gnu   # works out of the box
 ```
 
-Go's pure-Go dependencies make cross-compilation straightforward. Zig's C dependencies (`upb`, `utf8_range`, `bz2`) require either
-cross-compiled versions of those libraries or building them from source for the target. Windows cross-compilation is not supported on `main`; see the [`feat/windows-support`](../../tree/feat/windows-support) branch.
+Go's pure-Go dependencies make cross-compilation straightforward. Zig's vendored bzip2
+and zig-protobuf compile from source for any target. Windows cross-compilation is
+maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch.
 
 ### 10.6 Concurrency Model Clarity
 

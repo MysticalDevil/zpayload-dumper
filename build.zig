@@ -100,7 +100,7 @@ pub fn build(b: *std.Build) void {
     });
     const protobuf_mod = protobuf_dep.module("protobuf");
 
-    // --- Translate-C for bzip2 (compress_headers.h) ---
+    // --- Translate-C for bzip2 ---
     const translate_compress = b.addTranslateC(.{
         .root_source_file = b.path("vendor/bzip2/bzlib.h"),
         .target = options.target,

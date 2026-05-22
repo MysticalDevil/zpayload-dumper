@@ -38,7 +38,7 @@ ZSTD = 14;
 | 方面 | 状态 |
 |------|------|
 | proto 中定义 `ZSTD = 14` | ✅ 已存在于 `proto/update_metadata.proto` |
-| Zig 枚举中定义 `zstd = 14` | ✅ 已存在于 `src/ffi/upb.zig` |
+| Zig 枚举中定义 `zstd = 14` | ✅ 已存在于 `src/proto/chromeos_update_engine.pb.zig` |
 | 解压器 | ✅ `decompressZstdToWriter` 在 `src/compress/root.zig` |
 | 引擎分发 | ✅ 已在 `src/payload/engine.zig` 处理 |
 
@@ -190,7 +190,7 @@ FTF。
 
 ## 9. proto 已定义但引擎尚未实现的操作类型
 
-以下 `InstallOperation.Type` 值已经在 `proto/update_metadata.proto` 和 `src/ffi/upb.zig` 中定义，但引擎中**缺少解压/应用逻辑**：
+以下 `InstallOperation.Type` 值已经在 `proto/update_metadata.proto` 和生成的 `src/proto/chromeos_update_engine.pb.zig` 中定义，但引擎中**缺少解压/应用逻辑**：
 
 | 类型 | 值 | 压缩/格式 | 状态 |
 |------|-----|----------|------|

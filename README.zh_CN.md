@@ -22,69 +22,19 @@ Android OTA 更新（特别是 A/B 无缝更新）会把各个分区的更新数
 ### 前置条件
 
 - Zig 0.16.0 或更高版本
-- `protoc`（Protocol Buffers 编译器），需要支持 upb
-- 系统库：`upb`、`utf8_range`、`bz2`
-  - XZ 和 Zstd 使用 Zig 原生 `std.compress`（无需系统库）
-  - 仅 bzip2 仍需 `libbz2.so`
+
+无需安装任何系统 C 库——所有依赖（protobuf 解码、bzip2）均已 vendored 或从源码编译。
 
 ### 发行版支持
 
 | 发行版 | 包管理器 | 状态 | 说明 |
 |--------|---------|------|------|
-| Arch Linux | `pacman` | ✅ 支持 | `protobuf` ≥ 34 自带 `protoc-gen-upb` |
-| Gentoo | `emerge` | ✅ 支持 | `dev-libs/protobuf[upb]` |
-| Ubuntu | `apt` | ⚠️ 需从源码编译 | apt 的 `protobuf-compiler`（3.21）缺少 upb 插件 |
-| Debian | `apt` | ⚠️ 需从源码编译 | 与 Ubuntu 相同 |
-| Fedora | `dnf` | ⚠️ 需从源码编译 | dnf 的 `protobuf-compiler` 缺少 upb 插件 |
-| Alpine | `apk` | ⚠️ 已知问题 | `protoc-gen-upb` 存在，但 Zig/musl 静态链接顺序会失败 |
-
-> **为什么 apt/dnf 需要源码编译：** `protoc-gen-upb` 和 `protoc-gen-upb_minitable` 插件仅在 protobuf 30+ 中提供。Ubuntu 24.04、Debian 12 和 Fedora 41 仍发布 protobuf 3.21.x，其 `protoc` 无法生成 upb C 代码。
-
-### 安装系统依赖
-
-#### Arch Linux
-
-```bash
-sudo pacman -S --needed protobuf bzip2
-```
-
-#### Gentoo
-
-```bash
-sudo emerge --ask dev-libs/protobuf app-arch/bzip2
-```
-
-#### Ubuntu / Debian / Fedora
-
-从源码编译安装 protobuf：
-
-```bash
-# 1. 安装编译依赖
-# Ubuntu/Debian:
-sudo apt install -y cmake g++ git libbz2-dev
-# Fedora:
-sudo dnf install -y cmake gcc-c++ git bzip2-devel
-
-# 2. 编译并安装 protobuf（包含 protoc + libupb + upb 生成器）
-git clone https://github.com/protocolbuffers/protobuf.git
-cd protobuf
-git checkout v34.1   # 或更新版本
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -Dprotobuf_BUILD_TESTS=OFF \
-  -Dprotobuf_BUILD_SHARED_LIBS=ON \
-  -Dprotobuf_BUILD_UPB=ON
-cmake --build build -j$(nproc)
-sudo cmake --install build
-
-# 3. 编译 zpayload-dumper
-cd /path/to/zpayload-dumper
-zig build
-```
-
-### Alpine Linux
-
-Alpine 的 `protobuf` 包（31.1+）包含 `protoc-gen-upb`，但 `upb` 仅以静态归档（`libupb.a`）形式提供。Zig 在 musl 目标上的链接器把静态库放在目标文件之前，导致 `upb_Arena_Free`、`upb_Decode` 等符号出现未定义错误。目前没有简单的变通方案；建议使用基于 glibc 的发行版（Arch、Gentoo、或从源码编译 protobuf 的 Ubuntu/Debian/Fedora）。
+| Arch Linux | `pacman` | ✅ 支持 | |
+| Gentoo | `emerge` | ✅ 支持 | |
+| Ubuntu | `apt` | ✅ 支持 | |
+| Debian | `apt` | ✅ 支持 | |
+| Fedora | `dnf` | ✅ 支持 | |
+| Alpine | `apk` | ✅ 支持 | |
 
 ### Docker 编译（任意系统）
 
@@ -119,7 +69,8 @@ zig build -Dbsdiff
 
 编译完成后，可通过 `zig build run -- ...` 直接运行，或从安装前缀的 `bin/zpayload-dumper` 调用。
 
-> **平台支持：** `main` 分支仅针对 Linux。Windows 交叉编译和原生构建在 [`feat/windows-support`](../../tree/feat/windows-support) 分支维护，该分支采用混合依赖模型：POSIX 目标链接系统库（`upb`、`utf8_range`、`bz2`），Windows 则从源码编译自带的 vendor 版本。
+> **平台支持：** `main` 分支仅针对 Linux。Windows 交叉编译和原生构建在
+> [`feat/windows-support`](../../tree/feat/windows-support) 分支维护。
 >
 > **异步实验：** [`feat/async-engine`](../../tree/feat/async-engine) 分支将手动线程池替换为 `std.Io.Group.concurrent`（运行在默认的基于线程的 `std.Io` 运行时上）。该分支包含一个实验性的 `std.Io.Uring`（io_uring）后端，但已被完全禁用——虽然配合 PR #31764 可以编译通过，但运行时会在 `CancelRegion.init` 的 fiber 上下文切换中崩溃。
 

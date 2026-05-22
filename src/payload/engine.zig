@@ -1,6 +1,5 @@
 const std = @import("std");
 const errors = @import("../errors.zig");
-const proto = @import("../proto/chromeos_update_engine.pb.zig");
 const compress = @import("../compress/root.zig");
 const progress = @import("progress.zig");
 const extent_writer = @import("extent_writer.zig");

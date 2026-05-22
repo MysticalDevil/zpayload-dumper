@@ -9,75 +9,20 @@ Zig implementation of Android `payload.bin` dumper.
 Prerequisites:
 
 - Zig `0.16.0` (install via your distro package manager or [ziglang.org](https://ziglang.org))
-- `protoc` with `--upb_out` and `--upb_minitable_out` plugins
-- System libs: `upb`, `utf8_range`, `bz2`
-  - XZ and Zstd use Zig's native `std.compress` (no system libs needed)
-  - Only bzip2 still requires `libbz2.so`
+
+No system C libraries are required — all dependencies (protobuf decoding, bzip2) are
+vendored or compiled from source.
 
 ### Distro Support
 
 | Distro | Package Manager | Status | Notes |
 |--------|----------------|--------|-------|
-| Arch Linux | `pacman` | ✅ Supported | `protobuf` ≥ 34 ships `protoc-gen-upb` |
-| Gentoo | `emerge` | ✅ Supported | `dev-libs/protobuf[upb]` |
-| Ubuntu | `apt` | ⚠️ Build from source | apt `protobuf-compiler` (3.21) lacks upb plugins |
-| Debian | `apt` | ⚠️ Build from source | same as Ubuntu |
-| Fedora | `dnf` | ⚠️ Build from source | dnf `protobuf-compiler` lacks upb plugins |
-| Alpine | `apk` | ⚠️ Known issue | `protoc-gen-upb` present, but Zig/musl static-link order fails |
-
-> **Why apt/dnf need source build:** The `protoc-gen-upb` and `protoc-gen-upb_minitable` plugins are only
-> included in protobuf 30+. Ubuntu 24.04, Debian 12 and Fedora 41 still ship protobuf 3.21.x,
-> whose `protoc` cannot generate upb C code.
-
-### Install Dependencies
-
-#### Arch Linux
-
-```bash
-sudo pacman -S --needed protobuf bzip2
-```
-
-#### Gentoo
-
-```bash
-sudo emerge --ask dev-libs/protobuf app-arch/bzip2
-```
-
-#### Ubuntu / Debian / Fedora
-
-Build protobuf from source:
-
-```bash
-# 1. Install build dependencies
-# Ubuntu/Debian:
-sudo apt install -y cmake g++ git libbz2-dev
-# Fedora:
-sudo dnf install -y cmake gcc-c++ git bzip2-devel
-
-# 2. Build & install protobuf (includes protoc + libupb + upb generators)
-git clone https://github.com/protocolbuffers/protobuf.git
-cd protobuf
-git checkout v34.1   # or newer
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -Dprotobuf_BUILD_TESTS=OFF \
-  -Dprotobuf_BUILD_SHARED_LIBS=ON \
-  -Dprotobuf_BUILD_UPB=ON
-cmake --build build -j$(nproc)
-sudo cmake --install build
-
-# 3. Build zpayload-dumper
-cd /path/to/zpayload-dumper
-zig build
-```
-
-#### Alpine Linux
-
-Alpine's `protobuf` package (31.1+) includes `protoc-gen-upb`, but `upb` is provided only as a
-static archive (`libupb.a`). Zig's linker on musl targets places static libraries before object
-files, causing undefined-symbol errors for `upb_Arena_Free`, `upb_Decode`, etc. There is currently
-no straightforward workaround; use a glibc-based distro (Arch, Gentoo, Ubuntu/Debian/Fedora with
-source-built protobuf) instead.
+| Arch Linux | `pacman` | ✅ Supported | |
+| Gentoo | `emerge` | ✅ Supported | |
+| Ubuntu | `apt` | ✅ Supported | |
+| Debian | `apt` | ✅ Supported | |
+| Fedora | `dnf` | ✅ Supported | |
+| Alpine | `apk` | ✅ Supported | |
 
 ### Docker build (any OS)
 
@@ -126,7 +71,8 @@ just release
 
 The artifact is placed in `release/` with `SHA256SUMS`.
 
-> **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch, which uses a hybrid dependency model: POSIX targets link system libraries (`upb`, `utf8_range`, `bz2`), while Windows compiles vendored sources.
+> **Platform support:** The `main` branch targets Linux. Windows cross-compilation and native builds
+> are maintained on the [`feat/windows-support`](../../tree/feat/windows-support) branch.
 >
 > **Async experiment:** The [`feat/async-engine`](../../tree/feat/async-engine) branch replaces the manual thread pool with `std.Io.Group.concurrent` (running on the default thread-based `std.Io` runtime). An experimental `std.Io.Uring` (io_uring) backend exists but is entirely disabled — it compiles with PR #31764 but segfaults at runtime in `CancelRegion.init` during fiber context switches.
 

@@ -301,7 +301,7 @@ Phase 3: Main thread drains leftover pending
 |----------|--------|-------|
 | XZ | `liblzma` FFI | `std.compress.xz` |
 | Zstd | `libzstd` FFI | `std.compress.zstd` |
-| Bzip2 | `libbz2` FFI | `libbz2` FFI（未变） |
+| Bzip2 | `libbz2` FFI（源码 vendor） | `libbz2` FFI（未变） |
 
 ### 对合成基准测试的影响
 
@@ -318,5 +318,5 @@ Phase 3: Main thread drains leftover pending
 
 ### 剩余工作
 
-Bzip2 是唯一剩余的 C FFI 依赖。原生 Zig bzip2 解码器可以彻底移除 `libbz2.so`，
+Bzip2 是唯一剩余的 C FFI 依赖。原生 Zig bzip2 解码器可以彻底移除 bzip2 FFI，
 但 `std.compress` 目前尚未包含。可选方案：等待上游、自行移植、或静态链接 `lbzip2`。

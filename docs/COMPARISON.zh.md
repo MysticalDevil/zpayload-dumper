@@ -246,8 +246,8 @@ zpayload-dumper/
 │   │   ├── extent_writer.zig
 │   │   ├── progress.zig
 │   │   └── root.zig
-│   ├── ffi/               # C FFI 包装器
-│   │   └── upb.zig
+│   ├── proto/             # 生成的 protobuf 代码（已提交）
+│   │   └── chromeos_update_engine.pb.zig
 │   ├── input/             # 归档输入处理（zip、tar）
 │   │   ├── archive_common.zig
 │   │   ├── payload_zip.zig
@@ -359,10 +359,12 @@ require (
 // 无外部 Zig 包；仅系统库。
 ```
 
-- **运行时**：Zig 标准库 + 系统 C 库（`upb`、`utf8_range`、`bz2`）。
-  XZ 和 Zstd 使用 Zig 原生 `std.compress` 实现；只有 bzip2 仍需 `libbz2.so`。
-- **构建**：`zig build`（单条命令，但要求 `upb`、`utf8_range`、`bz2` 已安装）。
-- **Protobuf**：`protoc` 搭配 `--upb_out`（C 代码，通过 `addTranslateC` 转译为 Zig）。
+- **运行时**：Zig 标准库 + libc 仅（`link_libc = true`）。
+  无需外部系统 C 库——protobuf 解码使用纯 Zig [zig-protobuf](https://github.com/Arwalk/zig-protobuf)，
+  bzip2 通过 vendored 源码编译（`vendor/bzip2`）。XZ 和 Zstd 使用 Zig 原生 `std.compress`。
+- **构建**：`zig build`（单条命令，libc 之外零系统依赖）。
+- **Protobuf**：`update_metadata.proto` 通过 `protoc-gen-zig` 预生成 Zig 代码，
+  提交为 `src/proto/chromeos_update_engine.pb.zig`。构建时无需 `protoc`。
 
 ---
 
@@ -408,13 +410,12 @@ require (
 # Go：一条命令，零系统依赖
 go build
 
-# Zig：仅需少量系统 C 库
-zig build   # 若缺少 upb、utf8_range 或 bz2 则失败
+# Zig：libc 之外零系统依赖
+zig build
 ```
 
 Go 版本通过纯 Go 或 cgo 包装模块（`gozstd`、`go-xz`、标准库 `compress/bzip2`）打包了所有压缩库。
-Zig 版本对 XZ 和 Zstd 使用原生 Zig 标准库实现，仅需 `libbz2.so` 支持 bzip2。剩余系统依赖（`upb`、
-`utf8_range`）仅用于 protobuf 解析。
+Zig 版本现在使用 zig-protobuf（纯 Zig）解码 protobuf，bzip2 通过 vendored 源码编译——libc 之外无需任何外部系统库。
 
 ### 10.3 无需努力的内存安全
 
@@ -444,11 +445,12 @@ Zig 版本在多线程环境下手动管理内存，这很强大，但也增加�
 # Go：极简交叉编译
 GOOS=windows GOARCH=amd64 go build
 
-# Zig：同样优秀的交叉编译，但也需要 C 库的交叉编译
-zig build -Dtarget=aarch64-linux-gnu   # 需要 ARM64 版 upb/utf8_range/bz2
+# Zig：同样优秀的交叉编译
+zig build -Dtarget=aarch64-linux-gnu   # 开箱即用
 ```
 
-Go 的纯 Go 依赖使交叉编译非常顺畅。Zig 的 C 依赖（`upb`、`utf8_range`、`bz2`）需要这些库的交叉编译版本，或为目标平台从源码构建。`main` 分支暂不支持 Windows 交叉编译，见 [`feat/windows-support`](../../tree/feat/windows-support) 分支。
+Go 的纯 Go 依赖使交叉编译非常顺畅。Zig 的 vendored bzip2 和 zig-protobuf
+可为任意目标从源码编译。Windows 交叉编译见 [`feat/windows-support`](../../tree/feat/windows-support) 分支。
 
 ### 10.6 并发模型清晰度
 

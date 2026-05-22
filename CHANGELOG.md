@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Protobuf decoding**: replaced C FFI to `upb` (Google's micro protobuf library) with pure-Zig
+  [zig-protobuf](https://github.com/Arwalk/zig-protobuf) v5.0.0. The generated
+  `chromeos_update_engine.pb.zig` is committed and no longer requires `protoc` at build time.
+- **Bzip2 vendored**: `libbz2` is compiled from source as a git submodule (`vendor/bzip2`),
+  eliminating the last C system library dependency. Only libc remains (via `link_libc = true`).
+- **Removed `protoc` requirement**: neither `protoc` nor `protoc-gen-upb` are needed to build.
+  The generated protobuf code is committed; regenerating it is optional via zig-protobuf's
+  `protoc-gen-zig`.
+
+### Removed
+
+- `src/c/upb_wrap.c`, `src/c/upb_wrap.h` — C wrappers for upb protobuf decoding.
+- `src/ffi/upb.zig` — Zig FFI layer for upb.
+- `src/c/compress_headers.h` — translate-c now reads `vendor/bzip2/bzlib.h` directly.
+- `libupb`, `libutf8_range`, `libbz2` system library dependencies.
+
+### Added
+
+- `src/proto/chromeos_update_engine.pb.zig` — generated Zig protobuf code for the
+  Android Update Engine metadata schema.
+- `vendor/bzip2` — bzip2 1.1.0 as a git submodule.
+- `src/c/bz_version.h` — version header for the vendored bzip2 build.
+
 ### Added
 
 - `-v`, `--version` flag to print version and tool description.

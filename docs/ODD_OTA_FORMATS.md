@@ -42,7 +42,7 @@ the decompressor did not recognize type `14`.
 | Aspect | Status |
 |--------|--------|
 | `ZSTD = 14` in proto | ✅ Present in `proto/update_metadata.proto` |
-| `ZSTD = 14` in Zig enum | ✅ Present in `src/ffi/upb.zig` |
+| `ZSTD = 14` in Zig enum | ✅ Present in `src/proto/chromeos_update_engine.pb.zig` |
 | Decompressor | ✅ `decompressZstdToWriter` in `src/compress/root.zig` |
 | Engine dispatch | ✅ Handled in `src/payload/engine.zig` |
 
@@ -200,7 +200,8 @@ Applying these requires the original partition image. The tool must be given a d
 
 ## 9. Proto-Defined but Not Yet Implemented Operations
 
-The following `InstallOperation.Type` values are already present in `proto/update_metadata.proto` and `src/ffi/upb.zig`, but
+The following `InstallOperation.Type` values are already present in `proto/update_metadata.proto` and
+the generated `src/proto/chromeos_update_engine.pb.zig`, but
 **lack decompression / application logic** in the engine:
 
 | Type | Value | Compression / Format | Status |

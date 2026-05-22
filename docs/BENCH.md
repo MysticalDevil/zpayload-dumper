@@ -328,7 +328,10 @@ Zig's standard library:
 |-------------|--------|-------|
 | XZ | `liblzma` FFI | `std.compress.xz` |
 | Zstd | `libzstd` FFI | `std.compress.zstd` |
-| Bzip2 | `libbz2` FFI | `libbz2` FFI (unchanged) |
+| Bzip2 | `libbz2` FFI (vendored source) | `libbz2` FFI (unchanged) |
+
+> **Note:** bzip2 is now compiled from a vendored git submodule (`vendor/bzip2`).
+> The `libbz2.so` system library is no longer required.
 
 ### Impact on Synthetic Benchmarks
 
@@ -348,5 +351,5 @@ synchronization overhead.
 ### Remaining Work
 
 Bzip2 is the sole remaining C FFI dependency. A native Zig bzip2 decoder would
-eliminate `libbz2.so` entirely, but `std.compress` does not yet include one.
+eliminate the bzip2 FFI entirely, but `std.compress` does not yet include one.
 Options: wait for upstream, port one, or bundle a statically-linked `lbzip2`.

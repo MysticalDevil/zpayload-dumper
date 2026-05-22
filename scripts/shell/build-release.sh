@@ -2,7 +2,6 @@
 # Generic release build via Docker for the current host architecture.
 #
 # Detects host architecture and builds natively (no qemu emulation).
-# Protobuf is compiled from source inside the container.
 #
 # Usage: ./scripts/shell/build-release.sh
 
